@@ -5,193 +5,256 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const serverPath = path.resolve(__dirname, '../dist/index.js');
 
-async function runTests() {
-  console.log('🧪 Starting upgraded agy-mcp stateful connection test suite...');
-  console.log(`Server script: ${serverPath}`);
+async function runTestSuite() {
+  console.log('🧪 Starting coding-agents-mcp comprehensive multi-agent test suite...\n');
+
+  const serverScript = path.resolve(__dirname, '../dist/index.js');
+  console.log(`Server script: ${serverScript}`);
 
   const transport = new StdioClientTransport({
     command: 'node',
-    args: [serverPath],
+    args: [serverScript],
     env: {
       ...process.env,
+      FORCE_COLOR: '0',
     },
   });
 
   const client = new Client(
-    { name: 'test-client', version: '1.2.0' },
+    { name: 'test-harness', version: '1.0.0' },
     { capabilities: {} }
   );
 
-  try {
-    await client.connect(transport);
-    console.log('✅ Connected to agy-mcp over StdioClientTransport');
+  await client.connect(transport);
+  console.log('✅ Connected to coding-agents-mcp over StdioClientTransport\n');
 
-    // 1. Test listTools
-    console.log('\n--- 1. Testing listTools ---');
+  try {
+    // -------------------------------------------------------------------------
+    // 1. tools/list Verification
+    // -------------------------------------------------------------------------
+    console.log('--- 1. Testing listTools ---');
     const toolsResult = await client.listTools();
     const toolNames = toolsResult.tools.map((t) => t.name);
-    console.log('Discovered tools:', toolNames);
+    console.log(`Discovered tools (${toolNames.length}):`, toolNames);
 
-    const expectedTools = [
+    const requiredTools = [
+      'delegate_task',
+      'delegate_ask',
+      'agents_status',
+      'delegate_diff',
+      'delegate_reset',
+      'delegate_sessions',
       'agy_task',
       'agy_ask',
       'agy_diff',
-      'agy_sessions',
       'agy_reset',
-      'agy_run_task',
-      'agy_chat',
-      'agy_plan',
-      'agy_list_models',
-      'agy_version',
     ];
 
-    for (const expected of expectedTools) {
-      if (!toolNames.includes(expected)) {
-        throw new Error(`Missing expected tool: ${expected}`);
+    for (const tool of requiredTools) {
+      if (!toolNames.includes(tool)) {
+        throw new Error(`Missing expected tool: "${tool}"`);
       }
     }
-    console.log('✅ All 10 tools registered (including agy_reset)');
+    console.log('✅ All primary polymorphic tools & backward-compatibility aliases registered!\n');
 
-    // 2. Test implicit multi-turn continuity (ZERO session_id passed!)
-    console.log('\n--- 2. Testing implicit multi-turn continuity (No session_id passed) ---');
-    const turn1Result = await client.callTool(
-      {
-        name: 'agy_task',
-        arguments: {
-          prompt: 'Remember this secret phrase: SILVER_FALCON_ALPHA',
-          workspace_dir: path.resolve(__dirname, '..'),
-          tier: 'fast',
-          include_diff: false,
-        },
-      },
-      undefined,
-      { timeout: 120000 }
-    );
-    const turn1Text = (turn1Result.content[0] as any).text;
-    console.log('Turn 1 Output:');
-    console.log(turn1Text);
-
-    // Call Turn 2 with NO session_id passed at all!
-    console.log('\n--- Turn 2 (No session_id passed) ---');
-    const turn2Result = await client.callTool(
-      {
-        name: 'agy_task',
-        arguments: {
-          prompt: 'What was the secret phrase I asked you to remember in our previous turn?',
-          workspace_dir: path.resolve(__dirname, '..'),
-          tier: 'fast',
-          include_diff: false,
-        },
-      },
-      undefined,
-      { timeout: 120000 }
-    );
-    const turn2Text = (turn2Result.content[0] as any).text;
-    console.log('Turn 2 Output:');
-    console.log(turn2Text);
-
-    if (!turn2Text.includes('SILVER_FALCON_ALPHA')) {
-      throw new Error('Implicit multi-turn continuity failed to recall secret phrase');
-    }
-    console.log('✅ Zero-config multi-turn continuity verified successfully!');
-
-    // 3. Test dedicated stateless one-off (agy_ask)
-    console.log('\n--- 3. Testing dedicated stateless one-off (agy_ask) ---');
-    const askResult = await client.callTool(
-      {
-        name: 'agy_ask',
-        arguments: {
-          prompt: 'In one sentence, what is a binary search tree?',
-          tier: 'fast',
-        },
-      },
-      undefined,
-      { timeout: 120000 }
-    );
-    const askText = (askResult.content[0] as any).text;
-    console.log(askText);
-    if (!askText.includes('One-off (Stateless)')) {
-      throw new Error('agy_ask did not execute as One-off (Stateless)');
-    }
-    console.log('✅ agy_ask one-off verified successfully!');
-
-    // 4. Test friendly session alias routing
-    console.log('\n--- 4. Testing friendly session alias routing ---');
-    const aliasResult = await client.callTool(
-      {
-        name: 'agy_task',
-        arguments: {
-          session_id: 'frontend-worker',
-          prompt: 'You are the frontend worker. Acknowledge with: FRONTEND_WORKER_ONLINE',
-          workspace_dir: path.resolve(__dirname, '..'),
-          tier: 'fast',
-          include_diff: false,
-        },
-      },
-      undefined,
-      { timeout: 120000 }
-    );
-    const aliasText = (aliasResult.content[0] as any).text;
-    console.log(aliasText);
-    if (!aliasText.includes('FRONTEND_WORKER_ONLINE')) {
-      throw new Error('Friendly session alias task failed');
-    }
-
-    // Inspect sessions list
-    const sessionsListResult = await client.callTool({
-      name: 'agy_sessions',
-      arguments: { action: 'list' },
-    });
-    const sessionsListText = (sessionsListResult.content[0] as any).text;
-    console.log('\nSessions list output:');
-    console.log(sessionsListText);
-    if (!sessionsListText.includes('frontend-worker')) {
-      throw new Error('Alias frontend-worker was not recorded in sessions list');
-    }
-    console.log('✅ Friendly session alias verified successfully!');
-
-    // 5. Test agy_reset (Clearing active connection state)
-    console.log('\n--- 5. Testing agy_reset tool ---');
-    const resetResult = await client.callTool({
-      name: 'agy_reset',
+    // -------------------------------------------------------------------------
+    // 2. agents_status Tool
+    // -------------------------------------------------------------------------
+    console.log('--- 2. Testing agents_status ---');
+    const statusRes: any = await client.callTool({
+      name: 'agents_status',
       arguments: {},
     });
-    console.log((resetResult.content[0] as any).text);
-    console.log('✅ agy_reset completed');
+    const statusText = statusRes.content[0].text;
+    console.log(statusText);
 
-    // 6. Test that next task after reset begins fresh
-    console.log('\n--- 6. Testing fresh conversation after reset ---');
-    const postResetResult = await client.callTool(
-      {
-        name: 'agy_task',
-        arguments: {
-          prompt: 'Do you remember the secret phrase from our earlier conversation, or is this a new conversation?',
-          workspace_dir: path.resolve(__dirname, '..'),
-          tier: 'fast',
-          include_diff: false,
-        },
-      },
-      undefined,
-      { timeout: 120000 }
-    );
-    const postResetText = (postResetResult.content[0] as any).text;
-    console.log('Post-Reset Output:');
-    console.log(postResetText);
-
-    if (postResetText.includes('SILVER_FALCON_ALPHA')) {
-      throw new Error('agy_reset did not detach conversation state; secret phrase was remembered!');
+    if (!statusText.includes('Claude Code') || !statusText.includes('Antigravity')) {
+      throw new Error('agents_status did not report Claude Code and Antigravity');
     }
-    console.log('✅ Fresh conversation boundary after reset verified successfully!');
+    console.log('✅ agents_status correctly discovered and reported local agent CLIs!\n');
 
-    console.log('\n🎉 ALL CONNECTION STATE & LIFECYCLE TESTS PASSED! 🎉\n');
+    // -------------------------------------------------------------------------
+    // 3. Claude Code: Multi-turn State Continuity (using Haiku for speed)
+    // -------------------------------------------------------------------------
+    console.log('--- 3. Testing Claude Code Stateful Continuity (haiku) ---');
+    const projectCodenameClaude = `FALCON_DELTA_${Date.now()}`;
+
+    console.log(`Sending Turn 1 (storing project codename: ${projectCodenameClaude})...`);
+    const claudeTurn1: any = await client.callTool({
+      name: 'delegate_task',
+      arguments: {
+        agent: 'claude',
+        model: 'haiku',
+        prompt: `The project codename is ${projectCodenameClaude}. Acknowledge with RECEIVED.`,
+      },
+    });
+    console.log('Claude Turn 1 output:\n', claudeTurn1.content[0].text);
+
+    console.log('\nSending Turn 2 without session_id (verifying implicit turn continuity)...');
+    const claudeTurn2: any = await client.callTool({
+      name: 'delegate_task',
+      arguments: {
+        agent: 'claude',
+        model: 'haiku',
+        prompt: 'What is the project codename? Reply with just the codename.',
+      },
+    });
+    const turn2Text = claudeTurn2.content[0].text;
+    console.log('Claude Turn 2 output:\n', turn2Text);
+
+    if (!turn2Text.includes(projectCodenameClaude)) {
+      throw new Error(`Claude Turn 2 failed to recall project codename. Expected ${projectCodenameClaude}`);
+    }
+    console.log('✅ Claude Code multi-turn session continuity verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 4. Antigravity: Multi-turn State Continuity
+    // -------------------------------------------------------------------------
+    console.log('--- 4. Testing Antigravity Stateful Continuity (gemini-3.8-flash-low) ---');
+    const projectCodenameAgy = `TITAN_OMEGA_${Date.now()}`;
+
+    console.log(`Sending Turn 1 (storing project codename: ${projectCodenameAgy})...`);
+    const agyTurn1: any = await client.callTool({
+      name: 'delegate_task',
+      arguments: {
+        agent: 'agy',
+        prompt: `The project codename is ${projectCodenameAgy}. Acknowledge with RECEIVED.`,
+      },
+    });
+    console.log('Agy Turn 1 output:\n', agyTurn1.content[0].text);
+
+    console.log('\nSending Turn 2 without session_id (verifying implicit turn continuity)...');
+    const agyTurn2: any = await client.callTool({
+      name: 'delegate_task',
+      arguments: {
+        agent: 'agy',
+        prompt: 'What is the project codename? Reply with just the codename.',
+      },
+    });
+    const agyTurn2Text = agyTurn2.content[0].text;
+    console.log('Agy Turn 2 output:\n', agyTurn2Text);
+
+    if (!agyTurn2Text.includes(projectCodenameAgy)) {
+      throw new Error(`Antigravity Turn 2 failed to recall project codename. Expected ${projectCodenameAgy}`);
+    }
+    console.log('✅ Antigravity multi-turn session continuity verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 5. Fast Stateless One-Off: delegate_ask (Claude haiku)
+    // -------------------------------------------------------------------------
+    console.log('--- 5. Testing Stateless delegate_ask ---');
+    const askRes: any = await client.callTool({
+      name: 'delegate_ask',
+      arguments: {
+        agent: 'claude',
+        model: 'haiku',
+        prompt: 'What is 7 * 8? Reply with just the number.',
+      },
+    });
+    const askText = askRes.content[0].text;
+    console.log('delegate_ask output:\n', askText);
+
+    if (!askText.includes('56')) {
+      throw new Error(`delegate_ask failed to calculate 7 * 8. Output: ${askText}`);
+    }
+    console.log('✅ delegate_ask stateless execution verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 6. Unified Git Diff Inspection: delegate_diff
+    // -------------------------------------------------------------------------
+    console.log('--- 6. Testing delegate_diff ---');
+    const diffRes: any = await client.callTool({
+      name: 'delegate_diff',
+      arguments: {},
+    });
+    const diffText = diffRes.content[0].text;
+    console.log(diffText);
+
+    if (!diffText.includes('Is Git Repository') || !diffText.includes('true')) {
+      throw new Error('delegate_diff did not recognize git repository');
+    }
+    console.log('✅ delegate_diff workspace inspection verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 7. Friendly Session Alias Routing: delegate_sessions
+    // -------------------------------------------------------------------------
+    console.log('--- 7. Testing Friendly Session Alias Routing ---');
+    const aliasRes: any = await client.callTool({
+      name: 'delegate_task',
+      arguments: {
+        agent: 'claude',
+        model: 'haiku',
+        session_id: 'qa-agent',
+        prompt: 'Say QA_AGENT_ONLINE in 1 line',
+      },
+    });
+    console.log('Alias run output:\n', aliasRes.content[0].text);
+
+    const listSessionsRes: any = await client.callTool({
+      name: 'delegate_sessions',
+      arguments: { action: 'list' },
+    });
+    const sessionsListText = listSessionsRes.content[0].text;
+    console.log(sessionsListText);
+
+    if (!sessionsListText.includes('qa-agent')) {
+      throw new Error('Friendly session alias "qa-agent" not present in delegate_sessions list');
+    }
+    console.log('✅ Friendly session alias routing verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 8. Session Reset Tool: delegate_reset
+    // -------------------------------------------------------------------------
+    console.log('--- 8. Testing delegate_reset ---');
+    const resetRes: any = await client.callTool({
+      name: 'delegate_reset',
+      arguments: {},
+    });
+    console.log(resetRes.content[0].text);
+
+    // Verify post-reset task starts with clean memory
+    const postResetRes: any = await client.callTool({
+      name: 'delegate_task',
+      arguments: {
+        agent: 'claude',
+        model: 'haiku',
+        prompt: 'What was the project codename from our earlier conversation? If you have no memory of it, say NO_MEMORY.',
+      },
+    });
+    const postResetText = postResetRes.content[0].text;
+    console.log('Post-reset output:\n', postResetText);
+
+    if (postResetText.includes(projectCodenameClaude)) {
+      throw new Error('Session reset failed: Agent still recalled previous turn codename!');
+    }
+    console.log('✅ Clean context separation after delegate_reset verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 9. Graceful Error on Missing Backend (Codex)
+    // -------------------------------------------------------------------------
+    console.log('--- 9. Testing Graceful Error Handling on Missing Agent ---');
+    const codexRes: any = await client.callTool({
+      name: 'delegate_task',
+      arguments: {
+        agent: 'codex',
+        prompt: 'test prompt',
+      },
+    });
+    console.log('Codex execution response:\n', codexRes.content[0].text);
+
+    if (!codexRes.isError || !codexRes.content[0].text.includes('not installed')) {
+      throw new Error('Missing agent did not return expected actionable install instructions');
+    }
+    console.log('✅ Missing agent graceful degradation verified!\n');
+
+    console.log('🎉 ALL MULTI-AGENT HUB INTEGRATION TESTS PASSED CLEANLY! 🎉\n');
   } finally {
     await client.close();
   }
 }
 
-runTests().catch((err) => {
-  console.error('\n❌ Test failed with error:', err);
+runTestSuite().catch((err) => {
+  console.error('❌ Test suite failed:', err);
   process.exit(1);
 });

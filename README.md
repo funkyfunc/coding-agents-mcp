@@ -26,7 +26,8 @@ Autonomous pair programming with your chosen CLI coding agent.
 - `agent`: `"auto"` (picks best installed), `"agy"`, `"claude"`, `"codex"`, `"cursor"`
 - `prompt`: The coding instruction, bug fix, or refactor request
 - `session_id`: Optional session ID or friendly name (e.g., `"frontend-refactor"`). Automatically maintains turn-by-turn context.
-- `tier`: `"fast"` | `"standard"` | `"deep"` (mapped to backend models)
+- `model`: Explicit model selection (`"haiku"`, `"sonnet"`, `"opus"` for Claude; `"gemini-3.8-flash-low"`, `"gemini-3.1-pro"` for Antigravity)
+- `thinking`: Thinking effort level (`"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`)
 - `mode`: `"edit"` (writes code) | `"plan"` (architectural dry run) | `"explain"` (read-only query)
 - `include_diff`: Appends a clean git diff patch of modified files
 

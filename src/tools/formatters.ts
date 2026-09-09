@@ -1,38 +1,40 @@
-import { getSessionAlias } from '../agy-runner.js';
-import { AgyExecutionResult } from '../types.js';
+import { AgentTaskResult } from '../adapters/types.js';
 
-export function formatAgyResponse(
-  result: AgyExecutionResult,
+/**
+ * Format any agent task result into a clean, markdown response with metadata footer.
+ */
+export function formatAgentResponse(
+  result: AgentTaskResult,
   actionTitle = 'Task Execution'
 ): string {
   const parts: string[] = [];
 
-  // Main response content
-  if (result.response && result.response.trim()) {
-    parts.push(result.response.trim());
+  // Main output content
+  if (result.output && result.output.trim()) {
+    parts.push(result.output.trim());
   } else if (result.error) {
     parts.push(`⚠️ **Error during execution:** ${result.error}`);
   } else {
-    parts.push('*(No text response returned by Antigravity)*');
+    parts.push('*(No text response returned by agent)*');
   }
 
   // Modified files list (if detected via git)
-  if (result.modifiedFiles && result.modifiedFiles.length > 0) {
+  if (result.diff && result.diff.filesChanged.length > 0) {
     parts.push('\n\n### 📁 Modified Workspace Files');
-    for (const f of result.modifiedFiles) {
+    for (const f of result.diff.filesChanged) {
       parts.push(`- \`${f}\``);
     }
   }
 
   // Git diff patch (if captured)
-  if (result.gitDiff && result.gitDiff.trim().length > 0) {
+  if (result.diff?.patch && result.diff.patch.trim().length > 0) {
     parts.push('\n\n### 🔍 Git Diff Patch');
     parts.push('```diff');
-    if (result.gitDiff.length > 5000) {
-      parts.push(result.gitDiff.slice(0, 5000));
-      parts.push('\n... (diff truncated, use agy_diff for complete patch)');
+    if (result.diff.patch.length > 5000) {
+      parts.push(result.diff.patch.slice(0, 5000));
+      parts.push('\n... (diff truncated, call delegate_diff for complete patch)');
     } else {
-      parts.push(result.gitDiff);
+      parts.push(result.diff.patch);
     }
     parts.push('```');
   }
@@ -40,61 +42,88 @@ export function formatAgyResponse(
   parts.push('\n\n---');
 
   // Metadata block
-  parts.push(`### 🤖 Antigravity ${actionTitle} Summary`);
-  parts.push(`- **Status:** \`${result.status}\``);
+  const agentDisplayName =
+    result.agent === 'claude'
+      ? 'Claude Code'
+      : result.agent === 'agy'
+        ? 'Antigravity'
+        : result.agent.toUpperCase();
 
-  if (result.isOneOff) {
+  parts.push(`### 🤖 ${agentDisplayName} ${actionTitle} Summary`);
+  parts.push(`- **Status:** \`${result.success ? 'SUCCESS' : 'FAILED'}\``);
+  if (result.modelUsed) {
+    parts.push(`- **Model:** \`${result.modelUsed}\``);
+  }
+
+  if (result.isOneOff || !result.sessionId) {
     parts.push(`- **Session Mode:** \`One-off (Stateless)\``);
   } else {
-    const alias = result.conversationId ? getSessionAlias(result.conversationId) : undefined;
-    const aliasText = alias ? ` [Alias: "${alias}"]` : '';
+    const aliasText = result.sessionAlias ? ` [Alias: "${result.sessionAlias}"]` : '';
     parts.push(
-      `- **Active Session:** \`${result.conversationId}\`${aliasText} *(auto-maintained on this connection; call \`agy_reset\` to start fresh)*`
+      `- **Active Session:** \`${result.sessionId}\`${aliasText} *(auto-maintained on this connection; call \`delegate_reset\` to start fresh)*`
     );
   }
 
-  parts.push(
-    `- **Duration:** \`${result.durationSeconds.toFixed(2)}s\` | **Turns:** \`${result.numTurns}\``
-  );
+  const durationSec = (result.durationMs / 1000).toFixed(2);
+  const turns = result.turns ?? 1;
+  parts.push(`- **Duration:** \`${durationSec}s\` | **Turns:** \`${turns}\``);
 
-  if (result.usage) {
-    const total = result.usage.total_tokens ?? 0;
-    const input = result.usage.input_tokens ?? 0;
-    const output = result.usage.output_tokens ?? 0;
-    const thinking = result.usage.thinking_tokens ?? 0;
-    const cacheRead = result.usage.cache_read_tokens ?? 0;
+  if (result.costUsd !== undefined) {
+    parts.push(`- **Cost:** \`$${result.costUsd.toFixed(4)}\``);
+  }
+
+  if (result.tokens) {
+    const total = result.tokens.total ?? 0;
+    const input = result.tokens.input ?? 0;
+    const output = result.tokens.output ?? 0;
+    const thinking = result.tokens.thinking ?? 0;
+    const cache = result.tokens.cache ?? 0;
 
     parts.push(
-      `- **Tokens:** Total: \`${total}\` (Input: \`${input}\`, Output: \`${output}\`, Thinking: \`${thinking}\`, Cache: \`${cacheRead}\`)`
+      `- **Tokens:** Total: \`${total}\` (Input: \`${input}\`, Output: \`${output}\`, Thinking: \`${thinking}\`, Cache: \`${cache}\`)`
     );
   }
 
   // Tool execution summary
-  const toolSteps = result.steps.filter(
-    (s) => s.stepType === 'tool' && s.toolName
-  );
-
-  if (toolSteps.length > 0) {
-    parts.push(`- **Tools Executed (${toolSteps.length}):**`);
-    for (const step of toolSteps) {
-      const tool = step.toolName;
-      let detail = '';
-      if (step.toolParameters) {
-        if (step.toolParameters.CommandLine) {
-          detail = `\`${step.toolParameters.CommandLine}\``;
-        } else if (step.toolParameters.TargetFile) {
-          detail = `\`${step.toolParameters.TargetFile}\``;
-        } else if (step.toolParameters.AbsolutePath) {
-          detail = `\`${step.toolParameters.AbsolutePath}\``;
-        } else if (step.toolParameters.DirectoryPath) {
-          detail = `\`${step.toolParameters.DirectoryPath}\``;
-        } else if (step.toolParameters.Query) {
-          detail = `\`${step.toolParameters.Query}\``;
-        }
-      }
-      parts.push(`  - \`${tool}\` ${detail} (${step.state})`);
+  if (result.toolsUsed && result.toolsUsed.length > 0) {
+    parts.push(`- **Tools Executed (${result.toolsUsed.length}):**`);
+    for (const tool of result.toolsUsed) {
+      const detail = tool.target ? ` \`${tool.target}\`` : '';
+      parts.push(`  - \`${tool.name}\`${detail} (${tool.status})`);
     }
   }
 
   return parts.join('\n');
+}
+
+/**
+ * Backward-compatible helper for legacy agy response formatting.
+ */
+export function formatAgyResponse(result: any, actionTitle = 'Task Execution'): string {
+  // If result is already an AgentTaskResult
+  if ('durationMs' in result) {
+    return formatAgentResponse(result, actionTitle);
+  }
+
+  // Map legacy AgyExecutionResult to AgentTaskResult
+  const mapped: AgentTaskResult = {
+    success: result.status === 'SUCCESS',
+    agent: 'agy',
+    output: result.response || '',
+    error: result.error,
+    sessionId: result.conversationId,
+    durationMs: (result.durationSeconds || 0) * 1000,
+    turns: result.numTurns,
+    tokens: result.usage
+      ? {
+          total: result.usage.total_tokens,
+          input: result.usage.input_tokens,
+          output: result.usage.output_tokens,
+          thinking: result.usage.thinking_tokens,
+          cache: result.usage.cache_read_tokens,
+        }
+      : undefined,
+  };
+
+  return formatAgentResponse(mapped, actionTitle);
 }

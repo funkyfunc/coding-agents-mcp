@@ -1,18 +1,51 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { executeAgyTask, resetActiveSession } from '../agy-runner.js';
-import { formatAgyResponse } from './formatters.js';
+import { registry } from '../adapters/registry.js';
+import { AgentId } from '../adapters/types.js';
+import { formatAgentResponse } from './formatters.js';
 
 export function registerTaskTools(server: McpServer): void {
-  // 1. Primary Unified Workhorse Tool: agy_task
+  // 1. Primary Polymorphic Workhorse Tool: delegate_task
   server.tool(
-    'agy_task',
-    'Delegate a coding task, bug fix, architectural plan, or codebase inquiry to Google Antigravity. By default, maintains conversation memory automatically across turns within this connection (zero-token overhead). Supports friendly session names (e.g., "frontend", "backend") and semantic intelligence tiers.',
+    'delegate_task',
+    'Delegate a coding task, bug fix, architectural refactor, or test implementation to a local autonomous CLI coding agent (Claude Code, Antigravity, Codex, Cursor). Automatically preserves conversation context across turns within this connection (zero-token overhead).',
     {
       prompt: z
         .string()
         .describe(
-          'Task instruction, bug description, or follow-up prompt for Antigravity.'
+          'Task instruction, bug description, or follow-up prompt for the coding agent.'
+        ),
+      agent: z
+        .enum(['auto', 'claude', 'agy', 'codex', 'cursor'])
+        .optional()
+        .default('auto')
+        .describe(
+          'Target CLI agent backend. "auto" selects the best installed agent (prioritizes Claude Code and Antigravity).'
+        ),
+      session_id: z
+        .string()
+        .optional()
+        .describe(
+          'Optional session ID or friendly name (e.g., "auth-worker", "refactor"). If omitted, automatically continues the active conversation for this agent on this connection. Pass "new" to start a fresh conversation.'
+        ),
+      model: z
+        .string()
+        .optional()
+        .describe(
+          'Explicit model selection:\n- Claude: "haiku" (default, fast/economical), "sonnet", "opus"\n- Antigravity: "gemini-3.8-flash-low" (default), "gemini-3.8-flash-high", "gemini-3.1-pro"\n- Codex: "gpt-4o-mini", "gpt-4o", "o3-mini"'
+        ),
+      thinking: z
+        .string()
+        .optional()
+        .describe(
+          'Thinking effort level:\n- Claude: "low", "medium", "high", "xhigh", "max"\n- Antigravity: "low", "high"'
+        ),
+      mode: z
+        .enum(['edit', 'plan', 'explain'])
+        .optional()
+        .default('edit')
+        .describe(
+          'Execution mode:\n- "edit": Autonomous pair programming with code editing & terminal execution.\n- "plan": Non-destructive architectural design without modifying files.\n- "explain": Read-only codebase inquiry and diagnostics.'
         ),
       workspace_dir: z
         .string()
@@ -20,30 +53,6 @@ export function registerTaskTools(server: McpServer): void {
         .describe(
           'Target workspace directory. Defaults to the current working directory.'
         ),
-      session_id: z
-        .string()
-        .optional()
-        .describe(
-          'Optional session ID or friendly name (e.g., "auth-worker"). If omitted, automatically continues the active conversation on this connection. Pass "new" or call agy_reset to start a fresh conversation.'
-        ),
-      mode: z
-        .enum(['edit', 'plan', 'explain'])
-        .optional()
-        .default('edit')
-        .describe(
-          'Execution mode:\n- "edit": Autonomous pair programming with code editing & terminal execution.\n- "plan": Non-destructive architectural planning without touching files.\n- "explain": Read-only codebase inquiry and diagnostics.'
-        ),
-      tier: z
-        .enum(['fast', 'standard', 'deep'])
-        .optional()
-        .default('standard')
-        .describe(
-          'Semantic reasoning tier:\n- "fast": Ultra-low latency & simple fixes (Gemini 3.8 Flash Low)\n- "standard": Balanced reasoning & high-speed coding (Gemini 3.8 Flash High)\n- "deep": Complex multi-file architecture & deep reasoning (Gemini 3.1 Pro / Claude Opus 4.6)'
-        ),
-      model: z
-        .string()
-        .optional()
-        .describe('Explicit model ID override (takes precedence over tier).'),
       one_off: z
         .boolean()
         .optional()
@@ -70,19 +79,15 @@ export function registerTaskTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        let conversationId = args.session_id;
-        if (conversationId === 'new') {
-          resetActiveSession();
-          conversationId = undefined;
-        }
+        const adapter = await registry.resolve(args.agent as AgentId);
 
-        const result = await executeAgyTask({
+        const result = await adapter.execute({
           prompt: args.prompt,
           workspaceDir: args.workspace_dir,
-          conversationId,
-          mode: args.mode,
-          tier: args.tier,
+          sessionId: args.session_id,
           model: args.model,
+          thinking: args.thinking,
+          mode: args.mode,
           oneOff: args.one_off,
           includeDiff: args.include_diff,
           timeoutSeconds: args.timeout_seconds,
@@ -90,7 +95,7 @@ export function registerTaskTools(server: McpServer): void {
           dangerouslySkipPermissions: true,
         });
 
-        const formatted = formatAgyResponse(
+        const formatted = formatAgentResponse(
           result,
           args.mode === 'plan'
             ? 'Plan'
@@ -106,64 +111,71 @@ export function registerTaskTools(server: McpServer): void {
               text: formatted,
             },
           ],
+          isError: !result.success,
         };
       } catch (err: any) {
         return {
-          isError: true,
           content: [
             {
               type: 'text',
-              text: `❌ Antigravity task execution failed:\n\n${err.message || String(err)}`,
+              text: `⚠️ **Task Delegation Error:** ${err.message}`,
             },
           ],
+          isError: true,
         };
       }
     }
   );
 
-  // 2. Dedicated Stateless One-Off Tool: agy_ask
+  // 2. Dedicated Stateless One-Off Tool: delegate_ask
   server.tool(
-    'agy_ask',
-    'Execute a quick, stateless one-off query or explanation with Antigravity. Strictly read-only; never mutates files, never touches the connection active session, and leaves zero session residue.',
+    'delegate_ask',
+    'Execute a fast, read-only question, diagnostic inquiry, or code review with a CLI coding agent without creating or altering conversation session state.',
     {
       prompt: z
         .string()
-        .describe(
-          'Question, code snippet to explain, or diagnostic query for Antigravity.'
-        ),
+        .describe('Inquiry, explanation request, or diagnostic prompt.'),
+      agent: z
+        .enum(['auto', 'claude', 'agy', 'codex', 'cursor'])
+        .optional()
+        .default('auto')
+        .describe('Target CLI agent backend (defaults to "auto").'),
+      model: z
+        .string()
+        .optional()
+        .describe('Model override (e.g. "haiku", "gemini-3.8-flash-low").'),
+      thinking: z
+        .string()
+        .optional()
+        .describe('Thinking effort level (e.g. "low", "medium", "high").'),
       workspace_dir: z
         .string()
         .optional()
-        .describe('Workspace directory to reference for context.'),
-      tier: z
-        .enum(['fast', 'standard', 'deep'])
-        .optional()
-        .default('fast')
-        .describe(
-          'Intelligence tier: "fast" (default for quick queries), "standard", or "deep".'
-        ),
-      model: z.string().optional().describe('Explicit model override ID.'),
+        .describe('Target workspace directory.'),
       timeout_seconds: z
         .number()
         .optional()
-        .default(180)
-        .describe('Execution timeout in seconds (default: 180s / 3m).'),
+        .default(120)
+        .describe('Execution timeout in seconds (default: 120s).'),
     },
     async (args) => {
       try {
-        const result = await executeAgyTask({
+        const adapter = await registry.resolve(args.agent as AgentId);
+
+        const result = await adapter.execute({
           prompt: args.prompt,
           workspaceDir: args.workspace_dir,
-          mode: 'explain',
-          tier: args.tier,
           model: args.model,
+          thinking: args.thinking,
+          mode: 'explain',
           oneOff: true,
           includeDiff: false,
           timeoutSeconds: args.timeout_seconds,
           dangerouslySkipPermissions: true,
         });
 
-        const formatted = formatAgyResponse(result, 'One-Off Query');
+        const formatted = formatAgentResponse(result, 'One-Off Query');
+
         return {
           content: [
             {
@@ -171,18 +183,87 @@ export function registerTaskTools(server: McpServer): void {
               text: formatted,
             },
           ],
+          isError: !result.success,
         };
       } catch (err: any) {
         return {
-          isError: true,
           content: [
             {
               type: 'text',
-              text: `❌ One-off query failed:\n\n${err.message || String(err)}`,
+              text: `⚠️ **Query Error:** ${err.message}`,
             },
           ],
+          isError: true,
         };
       }
+    }
+  );
+
+  // 3. Backward-Compatible Aliases for agy-mcp callers
+  server.tool(
+    'agy_task',
+    '[Legacy Alias -> delegate_task(agent="agy")] Delegate a coding task to Google Antigravity.',
+    {
+      prompt: z.string().describe('Task instruction or bug description.'),
+      workspace_dir: z.string().optional(),
+      session_id: z.string().optional(),
+      mode: z.enum(['edit', 'plan', 'explain']).optional().default('edit'),
+      model: z.string().optional(),
+      thinking: z.string().optional(),
+      one_off: z.boolean().optional().default(false),
+      include_diff: z.boolean().optional().default(true),
+      timeout_seconds: z.number().optional().default(600),
+      add_dirs: z.array(z.string()).optional(),
+    },
+    async (args) => {
+      const adapter = await registry.resolve('agy');
+      const result = await adapter.execute({
+        prompt: args.prompt,
+        workspaceDir: args.workspace_dir,
+        sessionId: args.session_id,
+        model: args.model,
+        thinking: args.thinking,
+        mode: args.mode,
+        oneOff: args.one_off,
+        includeDiff: args.include_diff,
+        timeoutSeconds: args.timeout_seconds,
+        addDirs: args.add_dirs,
+        dangerouslySkipPermissions: true,
+      });
+
+      return {
+        content: [{ type: 'text', text: formatAgentResponse(result, 'Antigravity Execution') }],
+        isError: !result.success,
+      };
+    }
+  );
+
+  server.tool(
+    'agy_ask',
+    '[Legacy Alias -> delegate_ask(agent="agy")] Fast stateless inquiry with Google Antigravity.',
+    {
+      prompt: z.string().describe('Inquiry or diagnostic prompt.'),
+      workspace_dir: z.string().optional(),
+      model: z.string().optional(),
+      timeout_seconds: z.number().optional().default(120),
+    },
+    async (args) => {
+      const adapter = await registry.resolve('agy');
+      const result = await adapter.execute({
+        prompt: args.prompt,
+        workspaceDir: args.workspace_dir,
+        model: args.model,
+        mode: 'explain',
+        oneOff: true,
+        includeDiff: false,
+        timeoutSeconds: args.timeout_seconds,
+        dangerouslySkipPermissions: true,
+      });
+
+      return {
+        content: [{ type: 'text', text: formatAgentResponse(result, 'Antigravity Query') }],
+        isError: !result.success,
+      };
     }
   );
 }
