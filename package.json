@@ -1,7 +1,7 @@
 {
   "name": "coding-agents-mcp",
   "version": "0.2.0",
-  "description": "Model Context Protocol (MCP) server for leading CLI coding agents: Google Antigravity, Anthropic Claude Code, OpenAI Codex, and Cursor Agent.",
+  "description": "Universal Model Context Protocol (MCP) gateway for autonomous AI coding agents: Anthropic Claude Code, Google Antigravity, OpenAI Codex, and Cursor Agent.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,7 +17,9 @@
     "watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsx test/test-runner.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test/test-runner.ts",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
@@ -30,14 +32,21 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "mcp-server",
     "coding-agents",
-    "agents",
-    "orchestrator",
+    "ai-agents",
+    "agent-tools",
+    "claude-code",
     "antigravity",
     "agy",
-    "claude-code",
     "codex",
-    "cursor"
+    "cursor",
+    "cursor-agent",
+    "developer-tools",
+    "pair-programming",
+    "orchestrator",
+    "cli",
+    "llm"
   ],
   "author": "funkyfunc",
   "license": "MIT",

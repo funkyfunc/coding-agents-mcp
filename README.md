@@ -1,11 +1,12 @@
-# coding-agents-mcp 🚀
+# coding-agents-mcp
 
-[![npm version](https://img.shields.io/npm/v/coding-agents-mcp.svg)](https://www.npmjs.com/package/coding-agents-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+### Universal Model Context Protocol (MCP) gateway for autonomous AI coding agents: Claude Code, Antigravity, Codex, and Cursor.
 
-**Universal Model Context Protocol (MCP) gateway for autonomous AI coding agents.**
+[![CI](https://github.com/funkyfunc/coding-agents-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/funkyfunc/coding-agents-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/coding-agents-mcp)](https://www.npmjs.com/package/coding-agents-mcp)
+[![license](https://img.shields.io/npm/l/coding-agents-mcp)](./LICENSE)
 
-`coding-agents-mcp` allows AI orchestrators, IDEs (Cursor, Windsurf), and desktop assistants (Claude Desktop) to delegate complex, multi-turn coding tasks to local CLI coding agents—including **Google Antigravity (`agy`)**, **Anthropic Claude Code (`claude`)**, **OpenAI Codex (`codex`)**, and **Cursor Agent (`cursor`)**.
+`coding-agents-mcp` allows AI orchestrators, IDEs (Cursor, Windsurf), and desktop assistants (Claude Desktop) to delegate complex, multi-turn coding tasks to local CLI coding agents—including **Anthropic Claude Code (`claude`)**, **Google Antigravity (`agy`)**, **OpenAI Codex (`codex`)**, and **Cursor Agent (`cursor`)**.
 
 ---
 
@@ -114,6 +115,12 @@ npm run build
 # Run end-to-end integration test suite
 npm test
 ```
+
+---
+
+## 🚀 Releasing
+
+Publishing to npm runs automatically in CI via npm **trusted publishing (OIDC)** when a version tag (`v*`) is pushed. See [RELEASING.md](./RELEASING.md) for details and one-time setup.
 
 ---
 
