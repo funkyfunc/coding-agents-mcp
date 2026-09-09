@@ -1,0 +1,53 @@
+{
+  "name": "coding-agents-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol (MCP) server for leading CLI coding agents: Google Antigravity, Anthropic Claude Code, OpenAI Codex, and Cursor Agent.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "coding-agents-mcp": "./dist/index.js",
+    "agy-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsx test/test-runner.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/funkyfunc/coding-agents-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/funkyfunc/coding-agents-mcp/issues"
+  },
+  "homepage": "https://github.com/funkyfunc/coding-agents-mcp#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "coding-agents",
+    "agents",
+    "orchestrator",
+    "antigravity",
+    "agy",
+    "claude-code",
+    "codex",
+    "cursor"
+  ],
+  "author": "funkyfunc",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
