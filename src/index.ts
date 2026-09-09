@@ -19,7 +19,7 @@ import { registry } from './adapters/registry.js';
 export function createServer(): McpServer {
   const server = new McpServer({
     name: 'coding-agents-mcp',
-    version: '0.1.0',
+    version: '0.2.0',
   });
 
   // 1. Primary Polymorphic Multi-Agent Tools
