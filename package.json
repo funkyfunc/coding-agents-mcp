@@ -6,8 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "coding-agents-mcp": "./dist/index.js",
-    "agy-mcp": "./dist/index.js"
+    "coding-agents-mcp": "dist/index.js",
+    "agy-mcp": "dist/index.js"
   },
   "files": [
     "dist"
