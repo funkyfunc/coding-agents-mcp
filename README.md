@@ -34,17 +34,32 @@ Autonomous pair programming with your chosen CLI coding agent.
 - `model`: Explicit model selection (`"haiku"`, `"sonnet"`, `"opus"` for Claude; `"gemini-3.8-flash-low"`, `"gemini-3.1-pro"` for Antigravity).
 - `thinking`: Thinking effort level (`"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`).
 - `mode`: `"edit"` (writes code) | `"plan"` (architectural dry run) | `"explain"` (read-only query).
+- `skills`: `string[]` — Specialized domain skills to inject (e.g., `["agy-customizations"]`). Supported natively by Antigravity.
+- `sandbox`: `boolean` — Run agent inside isolated process container / sandbox. Supported natively by Antigravity.
+- `raw_args`: `string[]` — Arbitrary CLI arguments passed directly to the agent binary (e.g. `["--verbose", "--fast-apply"]`). Enables immediate access to newly released upstream CLI features on day zero.
 - `include_diff`: Appends a clean git diff patch of modified files.
 - `agent_options`: Bag for agent-specific passthrough options (`agy.effort`, `agy.skills`, `agy.rules`, `claude.customFlags`).
 
 #### `delegate_ask`
-Stateless, read-only query or quick calculation without modifying active session state.
+Stateless, read-only query or quick calculation without modifying active session state. Supports `raw_args` passthrough.
 
 #### `delegate_diff`
 Workspace git diff inspector returning modified files, insertions, deletions, and unified patch without modifying the working tree.
 
 #### `agents_status`
-Auto-discovers and reports installed CLI versions, locations, and a **Deep Capabilities Matrix** (modes, thinking support, worktree isolation, sandboxing).
+Auto-discovers and reports installed CLI versions, locations, discovered Antigravity domain skills, and a **Deep Capabilities Matrix** (modes, thinking support, worktree isolation, sandboxing, custom skills).
+
+#### `agent_help`
+Introspects the live, version-accurate `--help` documentation and CLI flags of any installed coding agent binary (`claude`, `agy`, `cursor`, `codex`).
+- `agent`: `"claude"` | `"agy"` | `"cursor"` | `"codex"`.
+- `subtopic`: Optional subcommand or subtopic (e.g. `"mcp"`, `"doctor"`, `"plugin"`).
+
+#### `agent_skills`
+Discovers or inspects specialized domain skills available to subordinate agents (e.g., Google Antigravity custom skills from `builtin/skills/`, `~/.gemini/skills/`, or `<workspace>/skills/`).
+- `action`: `"list"` (view all discovered skills) | `"inspect"` (read full markdown instructions).
+- `agent`: `"agy"` (default).
+- `skill_name`: Name of the skill to inspect when `action="inspect"`.
+- `workspace_dir`: Optional workspace directory to scan for project-local skills.
 
 ---
 
@@ -101,11 +116,12 @@ Asynchronous in-memory message board for cross-agent coordination.
 
 ## 📋 Supervisor Prompt Templates
 
-`coding-agents-mcp` advertises 5 standard MCP prompt templates designed for high-performance agent-to-agent delegation:
+`coding-agents-mcp` advertises 6 standard MCP prompt templates designed for high-performance agent-to-agent delegation:
 
 | Prompt Name | Purpose | Key Arguments |
 | :--- | :--- | :--- |
 | `supervisor_delegate_contract` | Formulates goal-driven, invariant-enforced contracts | `task_goal`, `hard_invariants`, `acceptance_criteria`, `preferred_agent` |
+| `supervisor_explore_capabilities` | Explores live CLI `--help` and formulates tasks with `raw_args` | `target_agent`, `feature_goal` |
 | `evaluator_code_critique` | Evaluator-Optimizer diff critique and regression analysis | `contract_goal`, `git_diff`, `acceptance_criteria` |
 | `agent_handoff_template` | Compact cross-model handoff packet | `source_agent`, `target_agent`, `objective`, `decisions_summary`, `diff_patch` |
 | `architect_builder_plan` | System design prompt for architect-builder pipelines | `task_description`, `constraints` |

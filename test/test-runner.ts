@@ -49,6 +49,8 @@ async function runTestSuite() {
       'delegate_pipeline',
       'delegate_handoff',
       'agent_mailbox',
+      'agent_skills',
+      'agent_help',
       'agy_task',
       'agy_ask',
       'agy_diff',
@@ -405,6 +407,96 @@ async function runTestSuite() {
         throw new Error('Pipeline execution failed or did not report stage breakdown');
       }
       console.log('✅ Multi-Agent Orchestration Pipeline verified!\n');
+    }
+
+    // -------------------------------------------------------------------------
+    // 14. Specialized Domain Skills: agent_skills
+    // -------------------------------------------------------------------------
+    console.log('--- 14. Testing Specialized Domain Skills Discovery (agent_skills) ---');
+    const skillsListRes: any = await client.callTool({
+      name: 'agent_skills',
+      arguments: {
+        action: 'list',
+        agent: 'agy',
+      },
+    });
+    const skillsListText = skillsListRes.content[0].text;
+    console.log('Skills list output:\n', skillsListText);
+
+    if (!skillsListText.includes('Available Domain Skills') && !skillsListText.includes('agy-customizations')) {
+      throw new Error('agent_skills list did not return expected skills');
+    }
+
+    // Inspect a specific skill
+    const skillInspectRes: any = await client.callTool({
+      name: 'agent_skills',
+      arguments: {
+        action: 'inspect',
+        agent: 'agy',
+        skill_name: 'agy-customizations',
+      },
+    });
+    const inspectText = skillInspectRes.content[0].text;
+    console.log('Skill inspect preview:\n', inspectText.slice(0, 200));
+
+    if (!inspectText.includes('Antigravity Customization System Guide') && !inspectText.includes('agy-customizations')) {
+      throw new Error('agent_skills inspect failed to return skill documentation');
+    }
+    console.log('✅ agent_skills discovery and documentation inspection verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 15. Dynamic Introspection & Managed Passthrough: agent_help & raw_args
+    // -------------------------------------------------------------------------
+    console.log('--- 15. Testing Dynamic Help Introspection & Managed Passthrough ---');
+    if (hasClaude) {
+      const claudeHelpRes: any = await client.callTool({
+        name: 'agent_help',
+        arguments: {
+          agent: 'claude',
+        },
+      });
+      const claudeHelpText = claudeHelpRes.content[0].text;
+      console.log('Claude Help preview:\n', claudeHelpText.slice(0, 200));
+
+      if (!claudeHelpText.includes('Live CLI Help') || !claudeHelpText.includes('--model')) {
+        throw new Error('agent_help(claude) failed to return live CLI help output');
+      }
+      console.log('✅ agent_help(claude) live introspection verified!');
+    }
+
+    if (hasAgy) {
+      const agyHelpRes: any = await client.callTool({
+        name: 'agent_help',
+        arguments: {
+          agent: 'agy',
+        },
+      });
+      const agyHelpText = agyHelpRes.content[0].text;
+      console.log('Agy Help preview:\n', agyHelpText.slice(0, 200));
+
+      if (!agyHelpText.includes('Live CLI Help') || !agyHelpText.includes('--model')) {
+        throw new Error('agent_help(agy) failed to return live CLI help output');
+      }
+      console.log('✅ agent_help(agy) live introspection verified!');
+    }
+
+    if (activeAgent) {
+      console.log('Testing delegate_ask with raw_args passthrough...');
+      const rawArgsRes: any = await client.callTool({
+        name: 'delegate_ask',
+        arguments: {
+          agent: activeAgent,
+          prompt: 'Say PASSTHROUGH_OK in 1 line',
+          raw_args: activeAgent === 'claude' ? ['--verbose'] : ['--effort', 'low'],
+        },
+      });
+      const rawArgsText = rawArgsRes.content[0].text;
+      console.log('raw_args execution output:\n', rawArgsText);
+
+      if (!rawArgsText.includes('PASSTHROUGH_OK') && !rawArgsText.includes('SUCCESS')) {
+        throw new Error('delegate_ask with raw_args passthrough failed');
+      }
+      console.log('✅ raw_args managed passthrough verified!\n');
     }
 
     console.log('🎉 ALL MULTI-AGENT HUB INTEGRATION TESTS PASSED CLEANLY! 🎉\n');

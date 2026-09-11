@@ -195,4 +195,41 @@ export function registerPrompts(server: McpServer): void {
       ],
     })
   );
+
+  server.prompt(
+    'supervisor_explore_capabilities',
+    'Template guiding an orchestrator to dynamically explore an agent CLI help and formulate tasks with raw_args',
+    {
+      target_agent: z
+        .enum(['claude', 'agy', 'codex', 'cursor'])
+        .describe('Agent to explore capabilities for'),
+      feature_goal: z
+        .string()
+        .describe('What specific advanced capability or newly released feature you want to explore or use'),
+    },
+    (args) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              `=== CAPABILITY INTROSPECTION & MANAGED PASSTHROUGH ===`,
+              `Target Agent: ${args.target_agent.toUpperCase()}`,
+              `Feature Goal: ${args.feature_goal}`,
+              '',
+              `### 🔍 Instructions for Supervising Orchestrator:`,
+              `1. Call \`agent_help(agent="${args.target_agent}")\` to inspect the live CLI flags of the installed binary.`,
+              `2. Identify the flag(s) that match your goal: "${args.feature_goal}".`,
+              `3. Delegate the task to ${args.target_agent} using \`delegate_task\`:`,
+              `   - Set \`raw_args: ["<discovered-flag>"]\``,
+              `   - Set \`isolate_worktree: true\` to ensure the run is sandboxed in an ephemeral Git worktree.`,
+              `   - Formulate your prompt using contract-first objectives and acceptance tests.`,
+              `4. The command will execute inside the managed hypervisor, benefiting from full process safety, session memory, and git diff tracking.`,
+            ].join('\n'),
+          },
+        },
+      ],
+    })
+  );
 }

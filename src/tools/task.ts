@@ -75,11 +75,29 @@ export function registerTaskTools(server: McpServer): void {
         .describe(
           'Execute the task in an isolated ephemeral git worktree. Protects the main repository branch against dirty edits, conflicts, and file locking.'
         ),
+      skills: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Specialized domain skills to inject into the agent run (e.g. ["agy-customizations"]). Supported natively by Google Antigravity.'
+        ),
+      sandbox: z
+        .boolean()
+        .optional()
+        .describe(
+          'Execute the agent inside an isolated process container / sandbox. Supported natively by Google Antigravity.'
+        ),
       agent_options: z
         .record(z.any())
         .optional()
         .describe(
           'Deep configuration bag for agent-specific options (e.g. claude: { compact: true, effort: "high" }, agy: { sandbox: true, skills: [...] }).'
+        ),
+      raw_args: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Arbitrary CLI arguments to pass directly to the agent binary (e.g. ["--verbose", "--custom-flag"]). Enables instant access to newly released upstream CLI features.'
         ),
       timeout_seconds: z
         .number()
@@ -119,6 +137,9 @@ export function registerTaskTools(server: McpServer): void {
           timeoutSeconds: args.timeout_seconds,
           addDirs: args.add_dirs,
           isolateWorktree: args.isolate_worktree,
+          skills: args.skills,
+          sandbox: args.sandbox,
+          rawArgs: args.raw_args,
           agentOptions: args.agent_options,
           dangerouslySkipPermissions: true,
         });
@@ -194,6 +215,10 @@ export function registerTaskTools(server: McpServer): void {
         .record(z.any())
         .optional()
         .describe('Deep configuration bag for agent-specific options.'),
+      raw_args: z
+        .array(z.string())
+        .optional()
+        .describe('Arbitrary CLI arguments to pass directly to the agent binary.'),
     },
     async (args) => {
       try {
@@ -208,6 +233,7 @@ export function registerTaskTools(server: McpServer): void {
           oneOff: true,
           includeDiff: false,
           timeoutSeconds: args.timeout_seconds,
+          rawArgs: args.raw_args,
           agentOptions: args.agent_options,
           dangerouslySkipPermissions: true,
         });
@@ -252,6 +278,8 @@ export function registerTaskTools(server: McpServer): void {
       include_diff: z.boolean().optional().default(true),
       timeout_seconds: z.number().optional().default(600),
       add_dirs: z.array(z.string()).optional(),
+      skills: z.array(z.string()).optional().describe('Domain skills to activate (e.g. ["agy-customizations"]).'),
+      sandbox: z.boolean().optional().describe('Run inside container sandbox.'),
     },
     async (args) => {
       const adapter = await registry.resolve('agy');
@@ -266,6 +294,8 @@ export function registerTaskTools(server: McpServer): void {
         includeDiff: args.include_diff,
         timeoutSeconds: args.timeout_seconds,
         addDirs: args.add_dirs,
+        skills: args.skills,
+        sandbox: args.sandbox,
         dangerouslySkipPermissions: true,
       });
 

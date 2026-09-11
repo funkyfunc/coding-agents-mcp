@@ -39,6 +39,9 @@ export interface AgentTaskOptions {
   addDirs?: string[];
   dangerouslySkipPermissions?: boolean;
   isolateWorktree?: boolean;
+  skills?: string[];
+  sandbox?: boolean;
+  rawArgs?: string[];
   agentOptions?: AgentOptionsBag;
 }
 

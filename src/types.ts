@@ -27,6 +27,8 @@ export interface AgyRunOptions {
   addDirs?: string[];
   /** Run in sandbox mode */
   sandbox?: boolean;
+  /** Arbitrary CLI flags to pass directly to the agy binary */
+  rawArgs?: string[];
   /** Whether to capture and include a git diff of working directory changes */
   includeDiff?: boolean;
   /** Whether this is a stateless one-off call (does not persist in session registry) */

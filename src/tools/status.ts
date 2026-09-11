@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registry } from '../adapters/registry.js';
+import { discoverSkills } from '../skills.js';
 
 export function registerStatusTool(server: McpServer): void {
   server.tool(
@@ -59,6 +60,18 @@ export function registerStatusTool(server: McpServer): void {
 
         if (capRows.length > 2) {
           mdParts.push('', '### ⚡ Deep Capabilities Matrix', '', capRows.join('\n'));
+        }
+
+        const skills = discoverSkills();
+        if (skills.length > 0) {
+          const skillList = skills.map((s) => `\`${s.name}\``).join(', ');
+          mdParts.push(
+            '',
+            `### 🧠 Discovered Antigravity Skills (${skills.length})`,
+            `Available: ${skillList}`,
+            '',
+            '> **Tip:** Call `agent_skills(action="inspect", skill_name="<name>")` to read documentation, or pass `skills: ["<name>"]` to `delegate_task`.'
+          );
         }
 
         mdParts.push(

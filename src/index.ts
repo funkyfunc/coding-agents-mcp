@@ -15,6 +15,8 @@ import { registerVersionTool } from './tools/version.js';
 import { registerWorktreeTool } from './tools/worktree.js';
 import { registerPipelineTool } from './tools/pipeline.js';
 import { registerHandoffTools } from './tools/handoff.js';
+import { registerSkillsTool } from './tools/skills.js';
+import { registerHelpTool } from './tools/help.js';
 import { registerPrompts } from './prompts.js';
 import { setupShutdownHooks, reapAllChildren, registerShutdownCallback } from './reaper.js';
 import { registry } from './adapters/registry.js';
@@ -33,6 +35,8 @@ export function createServer(): McpServer {
   registerWorktreeTool(server); // delegate_worktree (git worktree sandbox isolation)
   registerPipelineTool(server); // delegate_pipeline (architect+builder & multi-agent workflows)
   registerHandoffTools(server); // delegate_handoff & agent_mailbox (inter-agent communication)
+  registerSkillsTool(server);   // agent_skills (discover & inspect Antigravity domain skills)
+  registerHelpTool(server);     // agent_help (introspect live CLI flags & help outputs)
   registerSessionsTool(server); // delegate_sessions, agy_sessions (multi-session registry)
   registerResetTool(server);    // delegate_reset, agy_reset (connection session reset)
 

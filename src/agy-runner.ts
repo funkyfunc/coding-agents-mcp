@@ -274,6 +274,12 @@ export async function executeAgyTask(
     }
   }
 
+  if (options.rawArgs && options.rawArgs.length > 0) {
+    for (const raw of options.rawArgs) {
+      args.push(raw);
+    }
+  }
+
   const timeoutMs = (options.timeoutSeconds ?? 600) * 1000;
 
   // Format prompt for explain mode if needed

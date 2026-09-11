@@ -109,10 +109,15 @@ export class AgyAdapter implements BaseAgentAdapter {
         ...(options.agentOptions?.agy?.addDirs || []),
       ];
 
-      // Format prompt with skills/rules instructions if provided in agentOptions
       let promptText = options.prompt;
-      if (options.agentOptions?.agy?.skills && options.agentOptions.agy.skills.length > 0) {
-        promptText = `[SKILLS REQUESTED: ${options.agentOptions.agy.skills.join(', ')}]\n${promptText}`;
+
+      // Merge skills from top-level or agentOptions
+      const skills = [
+        ...(options.skills || []),
+        ...(options.agentOptions?.agy?.skills || []),
+      ];
+      if (skills.length > 0) {
+        promptText = `[SKILLS REQUESTED: ${skills.join(', ')}]\n${promptText}`;
       }
       if (options.agentOptions?.agy?.rules && options.agentOptions.agy.rules.length > 0) {
         promptText = `[RULES TO ENFORCE: ${options.agentOptions.agy.rules.join('; ')}]\n${promptText}`;
@@ -120,6 +125,8 @@ export class AgyAdapter implements BaseAgentAdapter {
 
       // 1. Unified session resolution
       const sessionRes = resolveSessionId(this.id, options.sessionId);
+
+      const sandbox = options.sandbox ?? options.agentOptions?.agy?.sandbox;
 
       const agyRes = await executeAgyTask({
         prompt: promptText,
@@ -132,7 +139,8 @@ export class AgyAdapter implements BaseAgentAdapter {
         includeDiff: false, // We inspect diff non-destructively via git.ts
         timeoutSeconds: options.timeoutSeconds,
         addDirs: addDirs.length > 0 ? addDirs : undefined,
-        sandbox: options.agentOptions?.agy?.sandbox,
+        sandbox,
+        rawArgs: options.rawArgs,
         dangerouslySkipPermissions: options.dangerouslySkipPermissions !== false,
       });
 

@@ -144,11 +144,13 @@ export class ClaudeAdapter implements BaseAgentAdapter {
       args.push('--compact');
     }
 
-    // Agent options: Custom CLI flags passthrough
-    if (options.agentOptions?.claude?.customFlags && Array.isArray(options.agentOptions.claude.customFlags)) {
-      for (const flag of options.agentOptions.claude.customFlags) {
-        args.push(flag);
-      }
+    // Agent options: Custom CLI flags passthrough & rawArgs
+    const rawFlags = [
+      ...(options.rawArgs || []),
+      ...(options.agentOptions?.claude?.customFlags || []),
+    ];
+    for (const flag of rawFlags) {
+      args.push(flag);
     }
 
     // Session flags
