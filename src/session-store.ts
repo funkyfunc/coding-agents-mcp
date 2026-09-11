@@ -58,6 +58,18 @@ export function setActiveSession(
 }
 
 /**
+ * Get friendly alias for a given session ID, if one was registered.
+ */
+export function getSessionAlias(sessionId: string): string | undefined {
+  const info = sessionRegistry.get(sessionId);
+  if (info?.alias) return info.alias;
+  for (const [alias, id] of aliasToSessionId.entries()) {
+    if (id === sessionId) return alias;
+  }
+  return undefined;
+}
+
+/**
  * Resolve a session identifier (UUID, alias, "new", or omitted).
  */
 export function resolveSessionId(

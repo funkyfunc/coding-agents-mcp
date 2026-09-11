@@ -64,6 +64,12 @@ export function formatAgentResponse(
     );
   }
 
+  if (result.worktreePath) {
+    parts.push(
+      `- **Isolated Worktree:** \`${result.worktreePath}\` (Branch: \`${result.worktreeBranch || 'agent-branch'}\`)\n  *(Call \`delegate_worktree\` with action "merge" or "discard")*`
+    );
+  }
+
   const durationSec = (result.durationMs / 1000).toFixed(2);
   const turns = result.turns ?? 1;
   parts.push(`- **Duration:** \`${durationSec}s\` | **Turns:** \`${turns}\``);

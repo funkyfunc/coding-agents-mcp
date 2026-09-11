@@ -91,6 +91,15 @@ export function reapAllChildren(reason: string): void {
   activeProcesses.clear();
 }
 
+const shutdownCallbacks: Array<() => Promise<void> | void> = [];
+
+/**
+ * Register a cleanup callback to be executed on server shutdown.
+ */
+export function registerShutdownCallback(fn: () => Promise<void> | void): void {
+  shutdownCallbacks.push(fn);
+}
+
 /**
  * Install process signals and stdin closure hooks to guarantee zero orphan processes.
  */
@@ -104,6 +113,12 @@ export function setupShutdownHooks(server?: McpServer): void {
 
     process.stderr.write(`[coding-agents-mcp] Shutting down (${reason})...\n`);
     reapAllChildren(reason);
+
+    for (const cb of shutdownCallbacks) {
+      try {
+        await cb();
+      } catch {}
+    }
 
     if (server) {
       try {

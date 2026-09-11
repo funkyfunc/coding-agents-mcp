@@ -1,7 +1,7 @@
 {
   "name": "coding-agents-mcp",
-  "version": "0.2.0",
-  "description": "Universal Model Context Protocol (MCP) gateway for autonomous AI coding agents: Anthropic Claude Code, Google Antigravity, OpenAI Codex, and Cursor Agent.",
+  "version": "0.3.0",
+  "description": "Universal Model Context Protocol (MCP) gateway & orchestrator for autonomous AI coding agents: Anthropic Claude Code, Google Antigravity, OpenAI Codex, and Cursor Agent.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -45,6 +45,9 @@
     "developer-tools",
     "pair-programming",
     "orchestrator",
+    "multi-agent",
+    "git-worktree",
+    "agent-handoff",
     "cli",
     "llm"
   ],

@@ -2,6 +2,29 @@ import { GitDiffResult } from '../git.js';
 
 export type AgentId = 'auto' | 'agy' | 'claude' | 'codex' | 'cursor';
 
+export interface AgentOptionsBag {
+  claude?: {
+    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    compact?: boolean;
+    appendSystemPrompt?: string;
+    customFlags?: string[];
+  };
+  agy?: {
+    effort?: 'low' | 'high';
+    sandbox?: boolean;
+    addDirs?: string[];
+    rules?: string[];
+    skills?: string[];
+  };
+  cursor?: {
+    customRulesPath?: string;
+  };
+  codex?: {
+    fullAuto?: boolean;
+  };
+  [key: string]: any;
+}
+
 export interface AgentTaskOptions {
   agent?: AgentId;
   prompt: string;
@@ -15,6 +38,8 @@ export interface AgentTaskOptions {
   timeoutSeconds?: number;
   addDirs?: string[];
   dangerouslySkipPermissions?: boolean;
+  isolateWorktree?: boolean;
+  agentOptions?: AgentOptionsBag;
 }
 
 export interface AgentTokens {
@@ -46,6 +71,19 @@ export interface AgentTaskResult {
   diff?: GitDiffResult;
   modelUsed?: string;
   isOneOff?: boolean;
+  worktreePath?: string;
+  worktreeBranch?: string;
+}
+
+export interface AgentCapabilities {
+  modes: ('edit' | 'plan' | 'explain')[];
+  supportsThinking: boolean;
+  thinkingLevels: string[];
+  supportsWorktreeIsolation: boolean;
+  supportsSandbox: boolean;
+  supportsAddDirs: boolean;
+  supportsMultiTurn: boolean;
+  supportsCustomSkills: boolean;
 }
 
 export interface AgentStatus {
@@ -58,6 +96,7 @@ export interface AgentStatus {
   models: string[];
   defaultModel: string;
   thinkingLevels: string[];
+  capabilities?: AgentCapabilities;
   notes?: string;
 }
 

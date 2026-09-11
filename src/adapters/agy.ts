@@ -14,6 +14,7 @@ import {
 } from './types.js';
 import { executeAgyTask, findAgyBinary, getSessionAlias } from '../agy-runner.js';
 import { inspectGitWorkspace } from '../git.js';
+import { resolveSessionId, recordSessionActivity } from '../session-store.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +76,16 @@ export class AgyAdapter implements BaseAgentAdapter {
       ],
       defaultModel: 'gemini-3.8-flash-low',
       thinkingLevels: ['low', 'high'],
+      capabilities: {
+        modes: ['edit', 'plan', 'explain'],
+        supportsThinking: true,
+        thinkingLevels: ['low', 'high'],
+        supportsWorktreeIsolation: true,
+        supportsSandbox: true,
+        supportsAddDirs: true,
+        supportsMultiTurn: true,
+        supportsCustomSkills: true,
+      },
       notes: installed
         ? 'Google Antigravity CLI detected and ready for autonomous delegation.'
         : 'Google Antigravity CLI not found. Install via: npm install -g @google/antigravity-cli',
@@ -86,22 +97,42 @@ export class AgyAdapter implements BaseAgentAdapter {
     const workspaceDir = options.workspaceDir || process.cwd();
 
     try {
-      // Map effort from thinking parameter if provided
+      // Map effort from thinking parameter or agentOptions if provided
       let effort: 'low' | 'medium' | 'high' = 'medium';
-      if (options.thinking === 'low') effort = 'low';
-      else if (options.thinking === 'high') effort = 'high';
+      const effortVal = options.agentOptions?.agy?.effort || options.thinking;
+      if (effortVal === 'low') effort = 'low';
+      else if (effortVal === 'high') effort = 'high';
+
+      // Merge addDirs if provided in agentOptions
+      const addDirs = [
+        ...(options.addDirs || []),
+        ...(options.agentOptions?.agy?.addDirs || []),
+      ];
+
+      // Format prompt with skills/rules instructions if provided in agentOptions
+      let promptText = options.prompt;
+      if (options.agentOptions?.agy?.skills && options.agentOptions.agy.skills.length > 0) {
+        promptText = `[SKILLS REQUESTED: ${options.agentOptions.agy.skills.join(', ')}]\n${promptText}`;
+      }
+      if (options.agentOptions?.agy?.rules && options.agentOptions.agy.rules.length > 0) {
+        promptText = `[RULES TO ENFORCE: ${options.agentOptions.agy.rules.join('; ')}]\n${promptText}`;
+      }
+
+      // 1. Unified session resolution
+      const sessionRes = resolveSessionId(this.id, options.sessionId);
 
       const agyRes = await executeAgyTask({
-        prompt: options.prompt,
+        prompt: promptText,
         workspaceDir: options.workspaceDir,
-        conversationId: options.sessionId,
+        conversationId: sessionRes.sessionId || sessionRes.alias,
         mode: options.mode === 'plan' ? 'plan' : options.mode === 'explain' ? 'explain' : 'edit',
         model: options.model,
         effort,
         oneOff: options.oneOff,
         includeDiff: false, // We inspect diff non-destructively via git.ts
         timeoutSeconds: options.timeoutSeconds,
-        addDirs: options.addDirs,
+        addDirs: addDirs.length > 0 ? addDirs : undefined,
+        sandbox: options.agentOptions?.agy?.sandbox,
         dangerouslySkipPermissions: options.dangerouslySkipPermissions !== false,
       });
 
@@ -112,6 +143,17 @@ export class AgyAdapter implements BaseAgentAdapter {
         thinking: agyRes.usage?.thinking_tokens,
         cache: agyRes.usage?.cache_read_tokens,
       };
+
+      // 2. Record activity in unified session store
+      if (!options.oneOff && agyRes.conversationId) {
+        recordSessionActivity(
+          this.id,
+          agyRes.conversationId,
+          tokens.total || 0,
+          options.prompt.slice(0, 60),
+          sessionRes.alias
+        );
+      }
 
       const toolsUsed: AgentToolUse[] = agyRes.steps
         .filter((s) => s.stepType === 'tool' && s.toolName)
@@ -129,9 +171,9 @@ export class AgyAdapter implements BaseAgentAdapter {
           };
         });
 
-      const sessionAlias = agyRes.conversationId
+      const sessionAlias = sessionRes.alias || (agyRes.conversationId
         ? getSessionAlias(agyRes.conversationId)
-        : undefined;
+        : undefined);
 
       let diff = undefined;
       if (options.includeDiff !== false) {

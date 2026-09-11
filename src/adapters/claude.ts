@@ -90,6 +90,16 @@ export class ClaudeAdapter implements BaseAgentAdapter {
       models: ['haiku', 'sonnet', 'opus'],
       defaultModel: 'haiku',
       thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      capabilities: {
+        modes: ['edit', 'plan', 'explain'],
+        supportsThinking: true,
+        thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+        supportsWorktreeIsolation: true,
+        supportsSandbox: false,
+        supportsAddDirs: true,
+        supportsMultiTurn: true,
+        supportsCustomSkills: false,
+      },
       notes: installed
         ? 'Claude Code CLI detected and ready for autonomous delegation.'
         : 'Claude Code CLI not found. Install via: npm install -g @anthropic-ai/claude-code',
@@ -121,10 +131,23 @@ export class ClaudeAdapter implements BaseAgentAdapter {
     args.push('--model', model);
 
     // Thinking / Effort level
-    if (options.thinking) {
+    const effort = options.agentOptions?.claude?.effort || options.thinking;
+    if (effort) {
       const validEfforts = ['low', 'medium', 'high', 'xhigh', 'max'];
-      if (validEfforts.includes(options.thinking.toLowerCase())) {
-        args.push('--effort', options.thinking.toLowerCase());
+      if (validEfforts.includes(effort.toLowerCase())) {
+        args.push('--effort', effort.toLowerCase());
+      }
+    }
+
+    // Agent options: Compact flag
+    if (options.agentOptions?.claude?.compact) {
+      args.push('--compact');
+    }
+
+    // Agent options: Custom CLI flags passthrough
+    if (options.agentOptions?.claude?.customFlags && Array.isArray(options.agentOptions.claude.customFlags)) {
+      for (const flag of options.agentOptions.claude.customFlags) {
+        args.push(flag);
       }
     }
 
@@ -139,6 +162,9 @@ export class ClaudeAdapter implements BaseAgentAdapter {
 
     // Build prompt payload with contextual mode prefixing
     let finalPrompt = options.prompt;
+    if (options.agentOptions?.claude?.appendSystemPrompt) {
+      finalPrompt = `[SYSTEM INSTRUCTION: ${options.agentOptions.claude.appendSystemPrompt}]\n${finalPrompt}`;
+    }
     if (options.mode === 'plan') {
       finalPrompt = `[MODE: ARCHITECTURAL PLAN - DO NOT MODIFY ANY FILES]\n${options.prompt}`;
     } else if (options.mode === 'explain') {

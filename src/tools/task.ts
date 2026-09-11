@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { registry } from '../adapters/registry.js';
 import { AgentId } from '../adapters/types.js';
 import { formatAgentResponse } from './formatters.js';
+import { worktreeManager } from '../worktree.js';
 
 export function registerTaskTools(server: McpServer): void {
   // 1. Primary Polymorphic Workhorse Tool: delegate_task
@@ -13,7 +14,7 @@ export function registerTaskTools(server: McpServer): void {
       prompt: z
         .string()
         .describe(
-          'Task instruction, bug description, or follow-up prompt for the coding agent.'
+          'Task instruction, objective, and acceptance criteria for the coding agent. Best practice for supervisors: specify WHAT to accomplish, non-negotiable invariants, and test verification criteria. The worker operates autonomously with full tool access (reading/writing files, executing shell commands, resolving compiler/test errors) without micro-management.'
         ),
       agent: z
         .enum(['auto', 'claude', 'agy', 'codex', 'cursor'])
@@ -67,6 +68,19 @@ export function registerTaskTools(server: McpServer): void {
         .describe(
           'Automatically include a git diff summary of working directory modifications.'
         ),
+      isolate_worktree: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          'Execute the task in an isolated ephemeral git worktree. Protects the main repository branch against dirty edits, conflicts, and file locking.'
+        ),
+      agent_options: z
+        .record(z.any())
+        .optional()
+        .describe(
+          'Deep configuration bag for agent-specific options (e.g. claude: { compact: true, effort: "high" }, agy: { sandbox: true, skills: [...] }).'
+        ),
       timeout_seconds: z
         .number()
         .optional()
@@ -81,9 +95,21 @@ export function registerTaskTools(server: McpServer): void {
       try {
         const adapter = await registry.resolve(args.agent as AgentId);
 
+        let effectiveWorkspaceDir = args.workspace_dir;
+        let worktreeInstance: any;
+
+        if (args.isolate_worktree) {
+          const alias = args.session_id || `task-${Date.now()}`;
+          worktreeInstance = await worktreeManager.createWorktree(
+            alias,
+            args.workspace_dir || process.cwd()
+          );
+          effectiveWorkspaceDir = worktreeInstance.worktreePath;
+        }
+
         const result = await adapter.execute({
           prompt: args.prompt,
-          workspaceDir: args.workspace_dir,
+          workspaceDir: effectiveWorkspaceDir,
           sessionId: args.session_id,
           model: args.model,
           thinking: args.thinking,
@@ -92,8 +118,15 @@ export function registerTaskTools(server: McpServer): void {
           includeDiff: args.include_diff,
           timeoutSeconds: args.timeout_seconds,
           addDirs: args.add_dirs,
+          isolateWorktree: args.isolate_worktree,
+          agentOptions: args.agent_options,
           dangerouslySkipPermissions: true,
         });
+
+        if (worktreeInstance) {
+          result.worktreePath = worktreeInstance.worktreePath;
+          result.worktreeBranch = worktreeInstance.branchName;
+        }
 
         const formatted = formatAgentResponse(
           result,
@@ -157,6 +190,10 @@ export function registerTaskTools(server: McpServer): void {
         .optional()
         .default(120)
         .describe('Execution timeout in seconds (default: 120s).'),
+      agent_options: z
+        .record(z.any())
+        .optional()
+        .describe('Deep configuration bag for agent-specific options.'),
     },
     async (args) => {
       try {
@@ -171,6 +208,7 @@ export function registerTaskTools(server: McpServer): void {
           oneOff: true,
           includeDiff: false,
           timeoutSeconds: args.timeout_seconds,
+          agentOptions: args.agent_options,
           dangerouslySkipPermissions: true,
         });
 

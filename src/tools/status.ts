@@ -35,16 +35,41 @@ export function registerStatusTool(server: McpServer): void {
           }
         }
 
-        const md = [
+        const capRows: string[] = [];
+        capRows.push('| Agent | Modes | Worktree Isolation | Reasoning / Thinking | Sandbox | Custom Skills |');
+        capRows.push('| :--- | :--- | :--- | :--- | :--- | :--- |');
+
+        for (const s of statuses) {
+          if (s.capabilities) {
+            const c = s.capabilities;
+            const modes = c.modes.join(', ');
+            const wt = c.supportsWorktreeIsolation ? '✅ Supported' : '❌';
+            const th = c.supportsThinking ? `✅ (${c.thinkingLevels.join(', ')})` : '❌';
+            const sb = c.supportsSandbox ? '✅ Supported' : '❌';
+            const sk = c.supportsCustomSkills ? '✅ Supported' : '❌';
+            capRows.push(`| **${s.name}** | \`${modes}\` | ${wt} | ${th} | ${sb} | ${sk} |`);
+          }
+        }
+
+        const mdParts = [
           '## 🤖 Supported CLI Coding Agents Status',
           '',
           rows.join('\n'),
+        ];
+
+        if (capRows.length > 2) {
+          mdParts.push('', '### ⚡ Deep Capabilities Matrix', '', capRows.join('\n'));
+        }
+
+        mdParts.push(
           '',
           '### Notes & Installation',
           notes.join('\n'),
           '',
-          '> **Tip:** When calling `delegate_task` or `delegate_ask`, pass `agent: "auto"` to automatically route to the best available installed backend.',
-        ].join('\n');
+          '> **Tip:** When calling `delegate_task` or `delegate_ask`, pass `agent: "auto"` to automatically route to the best available installed backend.'
+        );
+
+        const md = mdParts.join('\n');
 
         return {
           content: [

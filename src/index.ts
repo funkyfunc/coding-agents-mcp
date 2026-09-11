@@ -12,20 +12,27 @@ import { registerChatTool } from './tools/chat.js';
 import { registerPlanTool } from './tools/plan.js';
 import { registerListModelsTool } from './tools/list-models.js';
 import { registerVersionTool } from './tools/version.js';
+import { registerWorktreeTool } from './tools/worktree.js';
+import { registerPipelineTool } from './tools/pipeline.js';
+import { registerHandoffTools } from './tools/handoff.js';
 import { registerPrompts } from './prompts.js';
-import { setupShutdownHooks, reapAllChildren } from './reaper.js';
+import { setupShutdownHooks, reapAllChildren, registerShutdownCallback } from './reaper.js';
 import { registry } from './adapters/registry.js';
+import { worktreeManager } from './worktree.js';
 
 export function createServer(): McpServer {
   const server = new McpServer({
     name: 'coding-agents-mcp',
-    version: '0.2.0',
+    version: '0.3.0',
   });
 
   // 1. Primary Polymorphic Multi-Agent Tools
   registerTaskTools(server);     // delegate_task, delegate_ask, agy_task, agy_ask
   registerStatusTool(server);   // agents_status (health check & model list)
   registerDiffTool(server);     // delegate_diff, agy_diff (workspace git inspection)
+  registerWorktreeTool(server); // delegate_worktree (git worktree sandbox isolation)
+  registerPipelineTool(server); // delegate_pipeline (architect+builder & multi-agent workflows)
+  registerHandoffTools(server); // delegate_handoff & agent_mailbox (inter-agent communication)
   registerSessionsTool(server); // delegate_sessions, agy_sessions (multi-session registry)
   registerResetTool(server);    // delegate_reset, agy_reset (connection session reset)
 
@@ -50,6 +57,7 @@ async function main(): Promise<void> {
 
   // Install process signals and stdin closure traps
   setupShutdownHooks(server);
+  registerShutdownCallback(() => worktreeManager.cleanupAll());
 
   // Pre-flight check: report detected agents on stderr
   try {

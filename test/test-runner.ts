@@ -45,6 +45,10 @@ async function runTestSuite() {
       'delegate_diff',
       'delegate_reset',
       'delegate_sessions',
+      'delegate_worktree',
+      'delegate_pipeline',
+      'delegate_handoff',
+      'agent_mailbox',
       'agy_task',
       'agy_ask',
       'agy_diff',
@@ -211,7 +215,11 @@ async function runTestSuite() {
       if (!sessionsListText.includes('qa-agent')) {
         throw new Error('Friendly session alias "qa-agent" not present in delegate_sessions list');
       }
-      console.log('✅ Friendly session alias routing verified!\n');
+
+      if (hasAgy && !sessionsListText.includes('AGY')) {
+        throw new Error('Antigravity session missing from delegate_sessions list');
+      }
+      console.log('✅ Friendly session alias routing & unified multi-agent session list verified!\n');
     } else {
       const listSessionsRes: any = await client.callTool({
         name: 'delegate_sessions',
@@ -269,6 +277,135 @@ async function runTestSuite() {
       throw new Error('Missing agent did not return expected actionable install instructions');
     }
     console.log('✅ Missing agent graceful degradation verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 10. Git Worktree Isolation: delegate_worktree
+    // -------------------------------------------------------------------------
+    console.log('--- 10. Testing Git Worktree Isolation (delegate_worktree) ---');
+    const wtListRes: any = await client.callTool({
+      name: 'delegate_worktree',
+      arguments: { action: 'list' },
+    });
+    console.log('Worktree list response:\n', wtListRes.content[0].text);
+
+    if (activeAgent) {
+      console.log('Running task in isolated ephemeral worktree...');
+      const wtTaskRes: any = await client.callTool({
+        name: 'delegate_task',
+        arguments: {
+          agent: activeAgent,
+          session_id: 'ci-worker',
+          isolate_worktree: true,
+          prompt: 'Say CI_WORKTREE_OK in 1 line',
+        },
+      });
+      const wtTaskText = wtTaskRes.content[0].text;
+      console.log('Isolated task output:\n', wtTaskText);
+
+      if (!wtTaskText.includes('Isolated Worktree')) {
+        throw new Error('delegate_task with isolate_worktree did not report Isolated Worktree path');
+      }
+
+      // Discard worktree
+      const discardRes: any = await client.callTool({
+        name: 'delegate_worktree',
+        arguments: { action: 'discard', alias: 'ci-worker' },
+      });
+      console.log('Discard response:\n', discardRes.content[0].text);
+      console.log('✅ Ephemeral Git Worktree isolation & cleanup verified!\n');
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. Inter-Agent Mailbox: agent_mailbox
+    // -------------------------------------------------------------------------
+    console.log('--- 11. Testing Inter-Agent Mailbox (agent_mailbox) ---');
+    const sendMailRes: any = await client.callTool({
+      name: 'agent_mailbox',
+      arguments: {
+        action: 'send',
+        sender: 'claude',
+        recipient: 'agy',
+        subject: 'Architecture Spec Draft',
+        content: 'Please verify the JWT rotation strategy in auth.ts',
+      },
+    });
+    console.log('Mailbox send response:\n', sendMailRes.content[0].text);
+
+    const checkMailRes: any = await client.callTool({
+      name: 'agent_mailbox',
+      arguments: {
+        action: 'check',
+        recipient: 'agy',
+      },
+    });
+    const checkMailText = checkMailRes.content[0].text;
+    console.log('Mailbox check response:\n', checkMailText);
+
+    if (!checkMailText.includes('Architecture Spec Draft')) {
+      throw new Error('Message not found in agent_mailbox check');
+    }
+    console.log('✅ Inter-Agent Mailbox messaging verified!\n');
+
+    // -------------------------------------------------------------------------
+    // 12. Structured Inter-Agent Handoff: delegate_handoff
+    // -------------------------------------------------------------------------
+    if (hasClaude && hasAgy) {
+      console.log('--- 12. Testing Inter-Agent Handoff (Claude -> Antigravity) ---');
+      const handoffRes: any = await client.callTool({
+        name: 'delegate_handoff',
+        arguments: {
+          from_agent: 'claude',
+          to_agent: 'agy',
+          objective: 'Confirm inter-agent communication channel',
+          instructions: 'Acknowledge handoff receipt with HANDOFF_ACKNOWLEDGED in 1 line.',
+          target_mode: 'explain',
+        },
+      });
+      const handoffText = handoffRes.content[0].text;
+      console.log('Handoff response:\n', handoffText);
+
+      if (!handoffText.includes('HANDOFF_ACKNOWLEDGED') && !handoffText.includes('ACKNOWLEDGED')) {
+        throw new Error(`delegate_handoff did not return expected acknowledgement. Response: ${handoffText}`);
+      }
+      console.log('✅ Structured Inter-Agent Handoff verified!\n');
+    }
+
+    // -------------------------------------------------------------------------
+    // 13. Multi-Agent Orchestration Pipeline: delegate_pipeline
+    // -------------------------------------------------------------------------
+    if (activeAgent) {
+      console.log('--- 13. Testing Multi-Agent Orchestration Pipeline (delegate_pipeline) ---');
+      const pipeRes: any = await client.callTool({
+        name: 'delegate_pipeline',
+        arguments: {
+          pipeline_name: 'health-check',
+          topology: 'custom',
+          prompt: 'Echo confirmation of stage completion',
+          isolate_worktree: true,
+          custom_stages: [
+            {
+              id: 'stage_plan',
+              agent: activeAgent,
+              mode: 'plan',
+              prompt_template: 'Plan a health check for the server in 1 line. Say PLAN_OK.',
+            },
+            {
+              id: 'stage_verify',
+              agent: activeAgent,
+              mode: 'explain',
+              prompt_template: 'Review stage plan: {{stages.stage_plan.output}}. Confirm with PIPELINE_VERIFIED in 1 line.',
+            },
+          ],
+        },
+      });
+      const pipeText = pipeRes.content[0].text;
+      console.log('Pipeline output:\n', pipeText);
+
+      if (!pipeText.includes('SUCCESS') || !pipeText.includes('stage_plan')) {
+        throw new Error('Pipeline execution failed or did not report stage breakdown');
+      }
+      console.log('✅ Multi-Agent Orchestration Pipeline verified!\n');
+    }
 
     console.log('🎉 ALL MULTI-AGENT HUB INTEGRATION TESTS PASSED CLEANLY! 🎉\n');
   } finally {

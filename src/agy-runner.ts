@@ -12,41 +12,46 @@ import {
   AgyTier,
   AgyUsage,
 } from './types.js';
+import {
+  registerChildProcess,
+  unregisterChildProcess,
+  reapAllChildren as reaperReapAllChildren,
+} from './reaper.js';
+import {
+  getActiveSession,
+  setActiveSession,
+  resolveSessionId as resolveSessionStoreId,
+  recordSessionActivity,
+  resetSession,
+  listAllSessions,
+  getSessionAlias as getSessionStoreAlias,
+} from './session-store.js';
 
 let cachedAgyPath: string | null = null;
-
-// Track active child processes for bulletproof cleanup/reaping
-const activeChildProcesses = new Set<ChildProcess>();
-
-// In-memory session registry
-const sessionRegistry = new Map<string, AgySessionInfo>();
-
-// Friendly aliases (e.g. "worker-auth" -> UUID)
-const aliasToSessionIdMap = new Map<string, string>();
-const sessionIdToAliasMap = new Map<string, string>();
-
-// Connection-scoped active session ID (auto-threaded when caller omits session_id)
-let currentActiveSessionId: string | null = null;
 
 /**
  * Returns the currently active connection-scoped session ID.
  */
 export function getActiveSessionId(): string | null {
-  return currentActiveSessionId;
+  return getActiveSession('agy') || null;
 }
 
 /**
  * Sets or switches the active connection-scoped session ID.
  */
 export function setActiveSessionId(id: string | null): void {
-  currentActiveSessionId = id;
+  if (id) {
+    setActiveSession('agy', id);
+  } else {
+    resetSession('agy');
+  }
 }
 
 /**
  * Resets the active session on this connection to start fresh.
  */
 export function resetActiveSession(): void {
-  currentActiveSessionId = null;
+  resetSession('agy');
 }
 
 /**
@@ -54,49 +59,30 @@ export function resetActiveSession(): void {
  */
 export function resolveSessionId(aliasOrId?: string): string | undefined {
   if (!aliasOrId) return undefined;
-  return aliasToSessionIdMap.get(aliasOrId) || aliasOrId;
+  const res = resolveSessionStoreId('agy', aliasOrId);
+  return res.sessionId || aliasOrId;
 }
 
 /**
  * Registers a friendly alias for a conversation UUID.
  */
 export function registerSessionAlias(alias: string, sessionId: string): void {
-  aliasToSessionIdMap.set(alias, sessionId);
-  sessionIdToAliasMap.set(sessionId, alias);
+  setActiveSession('agy', sessionId, alias);
 }
 
 /**
  * Gets the friendly alias for a conversation UUID, if registered.
  */
 export function getSessionAlias(sessionId: string): string | undefined {
-  return sessionIdToAliasMap.get(sessionId);
+  return getSessionStoreAlias(sessionId);
 }
 
 /**
  * Reaps all running child processes immediately.
- * Called on parent process termination, stdin close, or shutdown signals.
+ * Delegates to centralized reaper.
  */
 export function reapAllChildren(reason: string): void {
-  if (activeChildProcesses.size === 0) return;
-
-  process.stderr.write(
-    `[agy-mcp] Reaping ${activeChildProcesses.size} active child process(es) (${reason})...\n`
-  );
-
-  for (const proc of activeChildProcesses) {
-    try {
-      if (!proc.killed) {
-        proc.kill('SIGTERM');
-        // Forceful kill fallback
-        setTimeout(() => {
-          try {
-            if (!proc.killed) proc.kill('SIGKILL');
-          } catch {}
-        }, 1000).unref();
-      }
-    } catch {}
-  }
-  activeChildProcesses.clear();
+  reaperReapAllChildren(reason);
 }
 
 /**
@@ -241,8 +227,8 @@ export async function executeAgyTask(
 
   if (options.conversationId) {
     targetConversationId = resolveSessionId(options.conversationId);
-  } else if (!options.oneOff && currentActiveSessionId) {
-    targetConversationId = currentActiveSessionId;
+  } else if (!options.oneOff && getActiveSessionId()) {
+    targetConversationId = getActiveSessionId() || undefined;
   }
 
   const args: string[] = [
@@ -306,8 +292,10 @@ export async function executeAgyTask(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // Register active child process for reaping
-    activeChildProcesses.add(proc);
+    const childPid = proc.pid || 0;
+    if (childPid) {
+      registerChildProcess(proc, 'agy', promptText);
+    }
 
     let stdoutData = '';
     let stderrData = '';
@@ -318,7 +306,9 @@ export async function executeAgyTask(
     const stepMap = new Map<number, AgyStepSummary>();
 
     const cleanupProcessRegistration = () => {
-      activeChildProcesses.delete(proc);
+      if (childPid) {
+        unregisterChildProcess(childPid);
+      }
     };
 
     const timeoutTimer = setTimeout(() => {
@@ -461,37 +451,13 @@ export async function executeAgyTask(
 
         // Update connection active session and registry
         if (!options.oneOff && conversationId) {
-          // If alias was passed (e.g. "worker-auth"), map it to the conversation UUID
-          if (aliasPassed && aliasPassed !== conversationId) {
-            registerSessionAlias(aliasPassed, conversationId);
-          }
-
-          // Automatically set as connection's active session
-          currentActiveSessionId = conversationId;
-
-          const now = new Date().toISOString();
-          const existingSession = sessionRegistry.get(conversationId);
-
-          if (existingSession) {
-            existingSession.lastActiveAt = now;
-            existingSession.turns += 1;
-            existingSession.totalTokens += resUsage?.total_tokens ?? 0;
-          } else {
-            const shortTitle =
-              options.prompt.length > 50
-                ? `${options.prompt.slice(0, 47)}...`
-                : options.prompt;
-
-            sessionRegistry.set(conversationId, {
-              id: conversationId,
-              title: aliasPassed || shortTitle,
-              createdAt: now,
-              lastActiveAt: now,
-              turns: resTurns,
-              workspaceDir: cwd,
-              totalTokens: resUsage?.total_tokens ?? 0,
-            });
-          }
+          recordSessionActivity(
+            'agy',
+            conversationId,
+            resUsage?.total_tokens ?? 0,
+            options.prompt.slice(0, 60),
+            aliasPassed
+          );
         }
 
         resolve(result);
@@ -576,43 +542,41 @@ export function listSessions(): (AgySessionInfo & {
   isActive: boolean;
   alias?: string;
 })[] {
-  return Array.from(sessionRegistry.values())
+  const active = getActiveSession('agy');
+  return listAllSessions()
+    .filter((s) => s.agent === 'agy')
     .map((s) => ({
-      ...s,
-      isActive: s.id === currentActiveSessionId,
-      alias: sessionIdToAliasMap.get(s.id),
-    }))
-    .sort(
-      (a, b) =>
-        new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime()
-    );
+      id: s.sessionId,
+      title: s.title || s.alias || s.sessionId,
+      createdAt: s.lastActive,
+      lastActiveAt: s.lastActive,
+      turns: s.turns,
+      workspaceDir: process.cwd(),
+      totalTokens: s.tokens,
+      isActive: s.sessionId === active,
+      alias: s.alias,
+    }));
 }
 
 export function getSession(id: string): AgySessionInfo | undefined {
   const resolved = resolveSessionId(id) || id;
-  return sessionRegistry.get(resolved);
+  const sessions = listSessions();
+  return sessions.find((s) => s.id === resolved || s.alias === id);
 }
 
 export function clearSessions(): number {
-  const count = sessionRegistry.size;
-  sessionRegistry.clear();
-  aliasToSessionIdMap.clear();
-  sessionIdToAliasMap.clear();
-  currentActiveSessionId = null;
-  return count;
+  const res = resetSession('agy');
+  return res.resetCount;
 }
 
 export function deleteSession(id: string): boolean {
+  const active = getActiveSession('agy');
   const resolved = resolveSessionId(id) || id;
-  if (currentActiveSessionId === resolved) {
-    currentActiveSessionId = null;
+  if (active === resolved) {
+    resetSession('agy');
+    return true;
   }
-  const alias = sessionIdToAliasMap.get(resolved);
-  if (alias) {
-    aliasToSessionIdMap.delete(alias);
-    sessionIdToAliasMap.delete(resolved);
-  }
-  return sessionRegistry.delete(resolved);
+  return false;
 }
 
 /**
