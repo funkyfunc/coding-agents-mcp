@@ -1,4 +1,4 @@
-import { ChildProcess } from 'node:child_process';
+import { ChildProcess, execSync } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 export interface ActiveProcess {
@@ -57,28 +57,54 @@ export function getActiveProcessCount(): number {
 }
 
 /**
+ * Terminate a process and all of its descendants across platform boundaries.
+ * On POSIX, sends the signal to the negative PID (-pid) to terminate the entire process group.
+ * On Windows, invokes taskkill /pid ${pid} /T /F.
+ */
+export function killProcessTree(pid: number, signal: NodeJS.Signals = 'SIGTERM'): void {
+  if (!pid) return;
+
+  if (process.platform === 'win32') {
+    try {
+      execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
+    } catch {}
+    return;
+  }
+
+  // POSIX: Send signal to the process group (-pid)
+  try {
+    process.kill(-pid, signal);
+    return;
+  } catch (err: any) {
+    // If process is not group leader (e.g. ESRCH or EPERM), fallback to direct PID
+    try {
+      process.kill(pid, signal);
+    } catch {}
+  }
+}
+
+/**
  * Kill all currently running child processes to prevent zombies.
+ * Uses process group signaling (-pid) on POSIX and taskkill on Windows.
  */
 export function reapAllChildren(reason: string): void {
   if (activeProcesses.size === 0) return;
 
   process.stderr.write(
-    `[coding-agents-mcp] Reaping ${activeProcesses.size} active child process(es) (${reason})...\n`
+    `[coding-agents-mcp] Reaping ${activeProcesses.size} active child process tree(s) (${reason})...\n`
   );
 
   for (const [pid, entry] of activeProcesses.entries()) {
     try {
       process.stderr.write(
-        `[coding-agents-mcp] Killing ${entry.agent} process (PID: ${pid}, task: "${entry.description.slice(0, 40)}")...\n`
+        `[coding-agents-mcp] Killing ${entry.agent} process tree (PID: ${pid}, task: "${entry.description.slice(0, 40)}")...\n`
       );
-      entry.child.kill('SIGTERM');
+      killProcessTree(pid, 'SIGTERM');
 
       // Schedule aggressive SIGKILL fallback if process does not exit in 1.5s
       setTimeout(() => {
         try {
-          if (!entry.child.killed) {
-            entry.child.kill('SIGKILL');
-          }
+          killProcessTree(pid, 'SIGKILL');
         } catch {}
       }, 1500).unref();
     } catch (err: any) {

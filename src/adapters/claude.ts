@@ -11,8 +11,8 @@ import {
   AgentTaskResult,
   AgentTokens,
 } from './types.js';
-import { registerChildProcess, unregisterChildProcess } from '../reaper.js';
-import { inspectGitWorkspace } from '../git.js';
+import { registerChildProcess, unregisterChildProcess, killProcessTree } from '../reaper.js';
+import { inspectGitWorkspace, getSafeGitEnv } from '../git.js';
 import { resolveSessionId, recordSessionActivity } from '../session-store.js';
 
 const execFileAsync = promisify(execFile);
@@ -173,8 +173,8 @@ export class ClaudeAdapter implements BaseAgentAdapter {
       finalPrompt = `[MODE: CODEBASE INQUIRY - READ ONLY]\n${options.prompt}`;
     }
 
-    // Add prompt as the final positional argument
-    args.push(finalPrompt);
+    // Add prompt as the final positional argument, using double-dash boundary to prevent flag injection
+    args.push('--', finalPrompt);
 
     // 3. Spawn child process
     return new Promise<AgentTaskResult>((resolve) => {
@@ -202,14 +202,17 @@ export class ClaudeAdapter implements BaseAgentAdapter {
       };
 
       try {
+        // Scrub git override environment variables to prevent directory confusion
+        const cleanEnv = getSafeGitEnv({
+          FORCE_COLOR: '0',
+          NO_COLOR: '1',
+        });
+
         const child = spawn(binary, args, {
           cwd: workspaceDir,
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: {
-            ...process.env,
-            FORCE_COLOR: '0',
-            NO_COLOR: '1',
-          },
+          detached: process.platform !== 'win32',
+          env: cleanEnv,
         });
 
         childPid = child.pid || 0;
@@ -226,13 +229,13 @@ export class ClaudeAdapter implements BaseAgentAdapter {
         timer = setTimeout(() => {
           if (!isSettled && childPid) {
             process.stderr.write(
-              `[coding-agents-mcp] Claude task timed out after ${options.timeoutSeconds || 600}s. Terminating PID ${childPid}...\n`
+              `[coding-agents-mcp] Claude task timed out after ${options.timeoutSeconds || 600}s. Terminating PID ${childPid} process group...\n`
             );
             try {
-              child.kill('SIGTERM');
+              killProcessTree(childPid, 'SIGTERM');
               setTimeout(() => {
                 try {
-                  child.kill('SIGKILL');
+                  killProcessTree(childPid, 'SIGKILL');
                 } catch {}
               }, 1500);
             } catch {}

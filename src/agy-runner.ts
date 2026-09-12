@@ -15,6 +15,7 @@ import {
 import {
   registerChildProcess,
   unregisterChildProcess,
+  killProcessTree,
   reapAllChildren as reaperReapAllChildren,
 } from './reaper.js';
 import {
@@ -26,6 +27,7 @@ import {
   listAllSessions,
   getSessionAlias as getSessionStoreAlias,
 } from './session-store.js';
+import { getSafeGitEnv } from './git.js';
 
 let cachedAgyPath: string | null = null;
 
@@ -289,13 +291,16 @@ export async function executeAgyTask(
   }
 
   return new Promise((resolve, reject) => {
+    // Scrub git override environment variables to prevent directory confusion
+    const cleanEnv = getSafeGitEnv({
+      PAGER: 'cat',
+    });
+
     const proc = spawn(agyPath, args, {
       cwd,
-      env: {
-        ...process.env,
-        PAGER: 'cat',
-      },
+      env: cleanEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
 
     const childPid = proc.pid || 0;
@@ -318,10 +323,16 @@ export async function executeAgyTask(
     };
 
     const timeoutTimer = setTimeout(() => {
-      proc.kill('SIGTERM');
-      const killTimer = setTimeout(() => proc.kill('SIGKILL'), 3000);
-      killTimer.unref();
-      cleanupProcessRegistration();
+      if (childPid) {
+        killProcessTree(childPid, 'SIGTERM');
+        const killTimer = setTimeout(() => {
+          try {
+            killProcessTree(childPid, 'SIGKILL');
+          } catch {}
+        }, 3000);
+        killTimer.unref();
+        cleanupProcessRegistration();
+      }
       reject(
         new Error(
           `Antigravity execution timed out after ${options.timeoutSeconds ?? 600} seconds`

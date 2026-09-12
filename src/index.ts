@@ -18,14 +18,32 @@ import { registerHandoffTools } from './tools/handoff.js';
 import { registerSkillsTool } from './tools/skills.js';
 import { registerHelpTool } from './tools/help.js';
 import { registerPrompts } from './prompts.js';
-import { setupShutdownHooks, reapAllChildren, registerShutdownCallback } from './reaper.js';
+import { setupShutdownHooks, reapAllChildren, registerShutdownCallback, killProcessTree } from './reaper.js';
 import { registry } from './adapters/registry.js';
 import { worktreeManager } from './worktree.js';
+import { safeGitExec, getSafeGitEnv } from './git.js';
+
+export {
+  DiffCircuitBreaker,
+  computeLevenshteinDistance,
+  computeNormalizedDiffDrift,
+  hashDiff,
+} from './circuit-breaker.js';
+export type { CircuitBreakerStatus } from './circuit-breaker.js';
+export {
+  killProcessTree,
+  reapAllChildren,
+  setupShutdownHooks,
+  registerShutdownCallback,
+  worktreeManager,
+  safeGitExec,
+  getSafeGitEnv,
+};
 
 export function createServer(): McpServer {
   const server = new McpServer({
     name: 'coding-agents-mcp',
-    version: '0.3.0',
+    version: '0.4.0',
   });
 
   // 1. Primary Polymorphic Multi-Agent Tools

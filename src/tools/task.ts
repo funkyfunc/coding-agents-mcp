@@ -5,6 +5,56 @@ import { AgentId } from '../adapters/types.js';
 import { formatAgentResponse } from './formatters.js';
 import { worktreeManager } from '../worktree.js';
 
+/**
+ * Sanitize raw arguments passed to underlying agent CLI binaries.
+ * Blocks shell injection attempts, metacharacters, and conflicting internal flags.
+ */
+export function sanitizeRawArgs(rawArgs?: string[]): string[] {
+  if (!rawArgs || !Array.isArray(rawArgs)) return [];
+
+  const forbiddenFlagPatterns = [
+    /^--print$/,
+    /^-p$/,
+    /^--output-format/,
+    /^--resume/,
+    /^--continue/,
+    /^--session/,
+    /^--dangerously-skip-permissions$/, // managed exclusively by hypervisor
+    /^--eval$/,
+  ];
+
+  // Shell chaining / command injection metacharacters
+  const dangerousCharRegex = /[;&|`$<>]/;
+
+  const sanitized: string[] = [];
+
+  for (const arg of rawArgs) {
+    if (typeof arg !== 'string') continue;
+    const trimmed = arg.trim();
+    if (!trimmed) continue;
+
+    // Check for dangerous shell metacharacters
+    if (dangerousCharRegex.test(trimmed)) {
+      throw new Error(
+        `Security Exception: Forbidden shell metacharacters detected in raw_args: "${trimmed}"`
+      );
+    }
+
+    // Check against forbidden control flags
+    const isForbidden = forbiddenFlagPatterns.some((pattern) => pattern.test(trimmed));
+    if (isForbidden) {
+      process.stderr.write(
+        `[coding-agents-mcp] Notice: Stripping hypervisor-controlled flag from raw_args: "${trimmed}"\n`
+      );
+      continue;
+    }
+
+    sanitized.push(trimmed);
+  }
+
+  return sanitized;
+}
+
 export function registerTaskTools(server: McpServer): void {
   // 1. Primary Polymorphic Workhorse Tool: delegate_task
   server.tool(
@@ -139,7 +189,7 @@ export function registerTaskTools(server: McpServer): void {
           isolateWorktree: args.isolate_worktree,
           skills: args.skills,
           sandbox: args.sandbox,
-          rawArgs: args.raw_args,
+          rawArgs: sanitizeRawArgs(args.raw_args),
           agentOptions: args.agent_options,
           dangerouslySkipPermissions: true,
         });
@@ -233,7 +283,7 @@ export function registerTaskTools(server: McpServer): void {
           oneOff: true,
           includeDiff: false,
           timeoutSeconds: args.timeout_seconds,
-          rawArgs: args.raw_args,
+          rawArgs: sanitizeRawArgs(args.raw_args),
           agentOptions: args.agent_options,
           dangerouslySkipPermissions: true,
         });

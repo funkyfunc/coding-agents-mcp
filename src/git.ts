@@ -14,6 +14,45 @@ export interface GitDiffResult {
 }
 
 /**
+ * Return a sanitized environment for git execution, stripping dangerous git override variables.
+ */
+export function getSafeGitEnv(
+  extraEnv: Record<string, string | undefined> = {}
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  return env;
+}
+
+/**
+ * Execute git with security overrides:
+ * - Disables core.fsmonitor to prevent arbitrary binary execution via fsmonitor
+ * - Clears core.hooksPath to neutralize GitSpawn malicious hook execution
+ * - Strips GIT_DIR / GIT_WORK_TREE override variables
+ */
+export async function safeGitExec(
+  args: string[],
+  options: { cwd?: string; maxBuffer?: number } = {}
+): Promise<{ stdout: string; stderr: string }> {
+  const securityArgs = [
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.hooksPath=',
+    '-c',
+    'core.longpaths=true',
+    ...args,
+  ];
+  return execFileAsync('git', securityArgs, {
+    cwd: options.cwd || process.cwd(),
+    env: getSafeGitEnv(),
+    maxBuffer: options.maxBuffer,
+  });
+}
+
+/**
  * Inspect workspace git status and diff non-destructively.
  * Never executes destructive operations (no reset, checkout, clean).
  */
@@ -29,7 +68,7 @@ export async function inspectGitWorkspace(
 
   try {
     // 1. Verify this is inside a git work tree
-    const isRepo = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
+    const isRepo = await safeGitExec(['rev-parse', '--is-inside-work-tree'], {
       cwd: workspaceDir,
     }).catch(() => null);
 
@@ -40,7 +79,7 @@ export async function inspectGitWorkspace(
     // 2. Query current branch
     let branch: string | undefined;
     try {
-      const branchRes = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      const branchRes = await safeGitExec(['rev-parse', '--abbrev-ref', 'HEAD'], {
         cwd: workspaceDir,
       });
       branch = branchRes.stdout.trim() || undefined;
@@ -50,7 +89,7 @@ export async function inspectGitWorkspace(
     let rawStatus = '';
     const filesChanged: string[] = [];
     try {
-      const statusRes = await execFileAsync('git', ['status', '--porcelain'], {
+      const statusRes = await safeGitExec(['status', '--porcelain'], {
         cwd: workspaceDir,
       });
       rawStatus = statusRes.stdout.trim();
@@ -68,11 +107,11 @@ export async function inspectGitWorkspace(
     let insertions = 0;
     let deletions = 0;
     try {
-      const statRes = await execFileAsync('git', ['diff', '--stat', 'HEAD'], {
+      const statRes = await safeGitExec(['diff', '--stat', 'HEAD'], {
         cwd: workspaceDir,
       }).catch(async () => {
         // Fallback if no HEAD commits exist
-        return execFileAsync('git', ['diff', '--stat'], { cwd: workspaceDir });
+        return safeGitExec(['diff', '--stat'], { cwd: workspaceDir });
       });
 
       const statOutput = statRes.stdout.trim();
@@ -86,17 +125,17 @@ export async function inspectGitWorkspace(
     // 5. Query actual unified diff patch (safely capped to 40KB)
     let patch: string | undefined;
     try {
-      const diffRes = await execFileAsync('git', ['diff', '-U3', 'HEAD'], {
+      const diffRes = await safeGitExec(['diff', '-U3', 'HEAD'], {
         cwd: workspaceDir,
         maxBuffer: 5 * 1024 * 1024,
       }).catch(async () => {
-        return execFileAsync('git', ['diff', '-U3'], {
+        return safeGitExec(['diff', '-U3'], {
           cwd: workspaceDir,
           maxBuffer: 5 * 1024 * 1024,
         });
       });
 
-      const fullPatch = diffRes.stdout.trim();
+      const fullPatch = diffRes.stdout.replace(/\r\n/g, '\n').trim();
       if (fullPatch) {
         if (fullPatch.length > 40000) {
           patch = fullPatch.slice(0, 40000) + '\n\n... [Diff truncated to 40KB] ...';

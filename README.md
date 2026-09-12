@@ -8,6 +8,16 @@
 
 `coding-agents-mcp` is an **Agent Hypervisor** and universal gateway for autonomous CLI coding agents. It enables AI supervisors, IDEs (Cursor, Windsurf), and desktop assistants (Claude Desktop, Google Antigravity) to orchestrate local coding agents—including **Anthropic Claude Code (`claude`)**, **Google Antigravity (`agy`)**, **OpenAI Codex (`codex`)**, and **Cursor Agent (`cursor`)**.
 
+## 🎯 Mission Statement & Cross-Platform Guarantee
+
+`coding-agents-mcp` is built on a core philosophy: **dependable, high-leverage simplicity and strict cross-platform parity across macOS, Linux, and Windows**.
+
+* **Zero Daemon / Zero Root:** Operates as a pure, unprivileged Node.js stdio process. No Docker daemon required, no root/sudo privileges needed, and no background services to manage.
+* **100% Cross-OS Consistency:** We explicitly reject fragile OS-specific virtualization silos (no deprecated macOS Seatbelt `sandbox-exec`, no Linux-only cgroups v2, no container virtualization lag). Every isolation, safety, and delegation feature runs identically on macOS, Ubuntu, and Windows/WSL using standard Git and Node.js primitives.
+* **Universal Sandboxing via Git Worktrees:** Ephemeral branch isolation with automatic GitSpawn security defenses (`-c core.fsmonitor=false -c core.hooksPath="" -c core.longpaths=true`), path canonicalization, and atomic merge/rollback.
+* **Orphan-Proof Process Reclamation:** Clean process group teardown using standard POSIX process groups (`process.kill(-pid)`) on Unix and `taskkill /pid ${pid} /T /F` on Windows with direct PID fallbacks.
+* **Cross-OS Diff & Hash Parity:** Automatic CRLF (`\r\n` -> `\n`) normalization in AST drift detectors and rolling diff hash sets ensures invariant checks and circuit breakers behave identically across Windows and Unix.
+
 ---
 
 ## 💡 Why coding-agents-mcp?
@@ -18,6 +28,7 @@
 4. **Inter-Agent Handoffs & Mailbox**: Transfer tasks across different models (e.g. Claude Code $\rightarrow$ Antigravity) using structured packets (objectives, file manifests, git diffs) instead of raw conversational transcripts, preventing context window explosion.
 5. **Native Multi-Agent Orchestration Pipelines**: Built-in declarative topologies (`architect_builder`, `peer_review`, `custom` DAGs) with automatic rollback and per-stage git diff verification.
 6. **Process Safety & Zombie Reaping**: Sub-process trees are registered with a unified process reaper that monitors parent `stdin` and OS signals (`SIGINT`, `SIGTERM`, `SIGHUP`) to guarantee zero orphan background processes.
+7. **Evidence-Based Systems Architecture**: Backed by formal theoretical foundations and empirical vulnerability analysis. See the **[Research Archives](docs/research/)** for the complete literature review, context degradation dynamics, and the **[RFC-0089: Agent Execution Packet Specification](docs/research/rfc-0089-agent-hypervisor-and-aep.md)**.
 
 ---
 

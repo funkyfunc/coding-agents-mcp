@@ -1,10 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { GitDiffResult, inspectGitWorkspace } from './git.js';
-
-const execFileAsync = promisify(execFile);
+import { GitDiffResult, inspectGitWorkspace, safeGitExec } from './git.js';
 
 export interface WorktreeInstance {
   alias: string;
@@ -21,8 +17,9 @@ export class GitWorktreeManager {
    * Get the root directory of the git repo for a given path.
    */
   async getRepoRoot(dir: string = process.cwd()): Promise<string> {
-    const res = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
-    return res.stdout.trim();
+    const res = await safeGitExec(['rev-parse', '--show-toplevel'], { cwd: dir });
+    const raw = res.stdout.trim();
+    return fs.existsSync(raw) ? fs.realpathSync(raw) : raw;
   }
 
   /**
@@ -30,7 +27,7 @@ export class GitWorktreeManager {
    */
   async isGitRepo(dir: string = process.cwd()): Promise<boolean> {
     try {
-      const res = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir });
+      const res = await safeGitExec(['rev-parse', '--is-inside-work-tree'], { cwd: dir });
       return res.stdout.trim().includes('true');
     } catch {
       return false;
@@ -39,6 +36,7 @@ export class GitWorktreeManager {
 
   /**
    * Create an ephemeral worktree for a session alias.
+   * Hardened against GitSpawn and symlink breakout vectors.
    */
   async createWorktree(
     alias: string,
@@ -48,6 +46,13 @@ export class GitWorktreeManager {
     const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     const branchName = `agent/${cleanAlias}-${Date.now()}`;
     const worktreeDir = path.join(repoRoot, '.git', 'agent-worktrees', cleanAlias);
+
+    // Path canonicalization verification: worktree target must reside inside repoRoot
+    const resolvedRepoRoot = fs.existsSync(repoRoot) ? fs.realpathSync(repoRoot) : path.resolve(repoRoot);
+    const resolvedParent = path.resolve(path.dirname(worktreeDir));
+    if (!resolvedParent.startsWith(resolvedRepoRoot)) {
+      throw new Error(`Security Exception: Worktree path escapes repository root: ${worktreeDir}`);
+    }
 
     // If already tracked and directory exists, return existing
     if (this.activeWorktrees.has(cleanAlias)) {
@@ -61,25 +66,30 @@ export class GitWorktreeManager {
     // Clean up previous leftover dir if exists
     if (fs.existsSync(worktreeDir)) {
       try {
-        await execFileAsync('git', ['worktree', 'remove', '--force', worktreeDir], { cwd: repoRoot });
+        await safeGitExec(['worktree', 'remove', '--force', worktreeDir], { cwd: repoRoot });
       } catch {
         fs.rmSync(worktreeDir, { recursive: true, force: true });
-        await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot }).catch(() => {});
+        await safeGitExec(['worktree', 'prune'], { cwd: repoRoot }).catch(() => {});
       }
     }
 
     // Get current HEAD branch
     let baseBranch = 'HEAD';
     try {
-      const branchRes = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot });
+      const branchRes = await safeGitExec(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot });
       baseBranch = branchRes.stdout.trim() || 'HEAD';
     } catch {}
 
     // Ensure parent dir exists
     fs.mkdirSync(path.dirname(worktreeDir), { recursive: true });
 
-    // Execute git worktree add
-    await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreeDir, 'HEAD'], {
+    // Enable worktreeConfig extension to sandbox config overrides
+    try {
+      await safeGitExec(['config', 'extensions.worktreeConfig', 'true'], { cwd: repoRoot });
+    } catch {}
+
+    // Execute git worktree add with security overrides (disabling hooks & fsmonitor)
+    await safeGitExec(['worktree', 'add', '-b', branchName, worktreeDir, 'HEAD'], {
       cwd: repoRoot,
     });
 
@@ -145,9 +155,8 @@ export class GitWorktreeManager {
 
     // In worktree, commit any uncommitted changes first
     try {
-      await execFileAsync('git', ['add', '-A'], { cwd: instance.worktreePath });
-      await execFileAsync(
-        'git',
+      await safeGitExec(['add', '-A'], { cwd: instance.worktreePath });
+      await safeGitExec(
         ['commit', '-m', options.commitMessage || `Agent changes from ${alias}`],
         { cwd: instance.worktreePath }
       );
@@ -158,13 +167,12 @@ export class GitWorktreeManager {
     // Merge into base repository
     const squash = options.squash !== false;
     if (squash) {
-      await execFileAsync('git', ['merge', '--squash', instance.branchName], { cwd: repoRoot });
+      await safeGitExec(['merge', '--squash', instance.branchName], { cwd: repoRoot });
       if (options.commitMessage) {
-        await execFileAsync('git', ['commit', '-m', options.commitMessage], { cwd: repoRoot });
+        await safeGitExec(['commit', '-m', options.commitMessage], { cwd: repoRoot });
       }
     } else {
-      await execFileAsync(
-        'git',
+      await safeGitExec(
         [
           'merge',
           '--no-ff',
@@ -178,7 +186,7 @@ export class GitWorktreeManager {
 
     let commitSha: string | undefined;
     try {
-      const shaRes = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot });
+      const shaRes = await safeGitExec(['rev-parse', 'HEAD'], { cwd: repoRoot });
       commitSha = shaRes.stdout.trim();
     } catch {}
 
@@ -203,8 +211,7 @@ export class GitWorktreeManager {
     try {
       const repoRoot = await this.getRepoRoot(path.dirname(instance.worktreePath)).catch(() => process.cwd());
       if (fs.existsSync(instance.worktreePath)) {
-        await execFileAsync(
-          'git',
+        await safeGitExec(
           ['worktree', 'remove', force ? '--force' : '', instance.worktreePath].filter(Boolean),
           { cwd: repoRoot }
         ).catch(() => {
@@ -212,8 +219,8 @@ export class GitWorktreeManager {
         });
       }
 
-      await execFileAsync('git', ['branch', '-D', instance.branchName], { cwd: repoRoot }).catch(() => {});
-      await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot }).catch(() => {});
+      await safeGitExec(['branch', '-D', instance.branchName], { cwd: repoRoot }).catch(() => {});
+      await safeGitExec(['worktree', 'prune'], { cwd: repoRoot }).catch(() => {});
     } finally {
       this.activeWorktrees.delete(cleanAlias);
     }

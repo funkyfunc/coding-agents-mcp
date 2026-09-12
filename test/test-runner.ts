@@ -2,6 +2,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import {
+  DiffCircuitBreaker,
+  computeLevenshteinDistance,
+  computeNormalizedDiffDrift,
+  hashDiff,
+  killProcessTree,
+} from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -498,6 +506,139 @@ async function runTestSuite() {
       }
       console.log('✅ raw_args managed passthrough verified!\n');
     }
+
+    // -------------------------------------------------------------------------
+    // 16. Kernel Process Group Reaping & Orphan Prevention
+    // -------------------------------------------------------------------------
+    console.log('--- 16. Testing Process Tree Reaping (killProcessTree) ---');
+    const detachedChild = spawn('node', ['-e', 'setInterval(() => {}, 1000)'], {
+      detached: process.platform !== 'win32',
+      stdio: 'ignore',
+    });
+    const testPid = detachedChild.pid;
+    if (!testPid) {
+      throw new Error('Failed to spawn test process for process group testing');
+    }
+    console.log(`Spawned detached test process group leader PID: ${testPid}`);
+
+    // Verify process is initially running
+    let isRunning = false;
+    try {
+      process.kill(testPid, 0);
+      isRunning = true;
+    } catch {}
+    if (!isRunning) {
+      throw new Error(`Detached process PID ${testPid} was not alive`);
+    }
+
+    // Terminate via killProcessTree
+    killProcessTree(testPid, 'SIGTERM');
+
+    // Allow brief moment for signal processing
+    await new Promise((r) => setTimeout(r, 200));
+
+    let stillRunning = false;
+    try {
+      process.kill(testPid, 0);
+      stillRunning = true;
+    } catch {}
+
+    if (stillRunning) {
+      killProcessTree(testPid, 'SIGKILL');
+      await new Promise((r) => setTimeout(r, 200));
+      try {
+        process.kill(testPid, 0);
+        throw new Error(`Process ${testPid} failed to terminate after killProcessTree`);
+      } catch {}
+    }
+    console.log('✅ killProcessTree successfully reaped process group!\n');
+
+    // -------------------------------------------------------------------------
+    // 17. Security Sanitization & Metacharacter Clamping
+    // -------------------------------------------------------------------------
+    console.log('--- 17. Testing Security Sanitization & Metacharacter Clamping ---');
+    // Test that shell metacharacters are rejected
+    const maliciousCall: any = await client.callTool({
+      name: 'delegate_ask',
+      arguments: {
+        agent: activeAgent || 'claude',
+        prompt: 'test prompt',
+        raw_args: ['; cat /etc/passwd'],
+      },
+    });
+
+    const malText = maliciousCall.content[0].text;
+    if (!maliciousCall.isError && !malText.includes('Security Exception')) {
+      throw new Error('Expected Security Exception for shell metacharacters in raw_args');
+    }
+    console.log('✅ Malicious metacharacters blocked with Security Exception:', malText);
+
+    // Test that hypervisor-controlled flags are stripped without error
+    const strippedFlagCall: any = await client.callTool({
+      name: 'delegate_ask',
+      arguments: {
+        agent: activeAgent || 'claude',
+        prompt: 'Say STRIP_OK in 1 line',
+        raw_args: ['--print', '--dangerously-skip-permissions'],
+      },
+    });
+    const strippedText = strippedFlagCall.content[0].text;
+    if (!strippedText.includes('STRIP_OK') && !strippedText.includes('SUCCESS')) {
+      throw new Error('Execution failed when hypervisor flags were stripped');
+    }
+    console.log('✅ Hypervisor control flags safely stripped!\n');
+
+    // -------------------------------------------------------------------------
+    // 18. Diff Circuit Breaker & AST Oscillation Detection
+    // -------------------------------------------------------------------------
+    console.log('--- 18. Testing Diff Circuit Breaker & AST Oscillation Detection ---');
+    // Test Levenshtein distance calculations
+    const dist1 = computeLevenshteinDistance('hello', 'hello');
+    const dist2 = computeLevenshteinDistance('kitten', 'sitting');
+    if (dist1 !== 0 || dist2 !== 3) {
+      throw new Error(`Levenshtein distance calculation failed: expected (0, 3), got (${dist1}, ${dist2})`);
+    }
+
+    // Test normalized drift
+    const driftSame = computeNormalizedDiffDrift('diff --git a b', 'diff --git a b');
+    const driftDiff = computeNormalizedDiffDrift('diff --git a b\n+foo', 'diff --git a b\n-bar');
+    if (driftSame !== 0 || driftDiff <= 0) {
+      throw new Error(`Normalized drift calculation failed: driftSame=${driftSame}, driftDiff=${driftDiff}`);
+    }
+
+    // Test Cross-OS CRLF normalization parity
+    const unixDiff = 'diff --git a/app.ts b/app.ts\n+const x = 1;\n';
+    const winDiff = 'diff --git a/app.ts b/app.ts\r\n+const x = 1;\r\n';
+    if (hashDiff(unixDiff) !== hashDiff(winDiff)) {
+      throw new Error('hashDiff failed cross-OS parity: CRLF and LF produced different hashes');
+    }
+    if (computeNormalizedDiffDrift(unixDiff, winDiff) !== 0) {
+      throw new Error('computeNormalizedDiffDrift failed cross-OS parity: CRLF vs LF had non-zero drift');
+    }
+    console.log('✅ Cross-OS CRLF vs LF normalization parity verified!');
+
+    // Test circuit breaker stagnation detection
+    const cb = new DiffCircuitBreaker(3, 0.05);
+    cb.evaluate('diff --git a/file.ts b/file.ts\n+const a = 1;');
+    cb.evaluate('diff --git a/file.ts b/file.ts\n+const a = 1; '); // trivial whitespace drift
+    cb.evaluate('diff --git a/file.ts b/file.ts\n+const a = 1;  ');
+    const r4 = cb.evaluate('diff --git a/file.ts b/file.ts\n+const a = 1;   ');
+    if (!r4.tripped || !r4.reason?.includes('Non-Progressive Iteration Deadlock')) {
+      throw new Error('Circuit breaker failed to trip on non-progressive stagnation');
+    }
+    console.log('✅ Non-progressive iteration deadlock tripped correctly:', r4.reason);
+
+    // Test AST oscillation detection (reverting to prior state)
+    const cbOsc = new DiffCircuitBreaker(5, 0.05);
+    const patchA = 'diff --git a/app.ts\n+function render() { return "A"; }';
+    const patchB = 'diff --git a/app.ts\n+function render() { return "B"; }';
+    cbOsc.evaluate(patchA); // Turn 1: State A
+    cbOsc.evaluate(patchB); // Turn 2: State B
+    const oscResult = cbOsc.evaluate(patchA); // Turn 3: Back to State A!
+    if (!oscResult.tripped || !oscResult.reason?.includes('AST Oscillation')) {
+      throw new Error('Circuit breaker failed to trip on AST oscillation');
+    }
+    console.log('✅ AST oscillation loop detected and tripped correctly:', oscResult.reason, '\n');
 
     console.log('🎉 ALL MULTI-AGENT HUB INTEGRATION TESTS PASSED CLEANLY! 🎉\n');
   } finally {
